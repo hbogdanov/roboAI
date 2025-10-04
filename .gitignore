@@ -205,3 +205,34 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# --- Webots Simulation Files ---
+*.wbo
+*.bak
+*.tmp
+webots_projects/*/build/
+webots_projects/*/controllers/*/build/
+
+# --- Machine Learning Artifacts ---
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.onnx
+*.npy
+*.npz
+*.pkl
+*.joblib
+*.model
+
+# --- Project Data ---
+data/
+results/
+checkpoints/
+logs/
+outputs/
+
+# --- Secrets & Configs ---
+config.yaml
+config.json
+secrets.json

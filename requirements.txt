@@ -1,0 +1,26 @@
+# Core Python scientific stack
+numpy
+pandas
+matplotlib
+plotly           
+networkx
+seaborn         
+
+# Machine Learning / Transformers
+torch
+transformers
+datasets
+accelerate
+sentencepiece
+scikit-learn
+
+# Experiment & Visualization Utilities
+tqdm             
+rich             
+PyYAML           
+python-dotenv    
+
+# Notebooks & Interactivity
+jupyter
+jupyterlab
+ipywidgets
