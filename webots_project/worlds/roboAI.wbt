@@ -1,13 +1,26 @@
 #VRML_SIM R2023b utf8
+
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/backgrounds/protos/TexturedBackground.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/robots/gctronic/e-puck/protos/E-puck.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/floors/protos/RectangleArena.proto"
+
 WorldInfo {
 }
 Viewpoint {
-  orientation -0.5773 0.5773 0.5773 2.0944
-  position 0 0 10
+  orientation 0.5701241122256608 -0.5780171459657846 -0.5838276077991439 4.210564058507654
+  position 0.0002678614566439879 -0.02146252281376422 2.7505966690674852
 }
 TexturedBackground {
 }
 TexturedBackgroundLight {
+}
+E-puck {
+  hidden position_0_0 78.0444206473747
+  hidden position_0_1 84.96741853847095
+  hidden rotation_1 0 1 0 2.646196961219655
+  hidden rotation_2 0 -0.9999999999999999 0 2.997175762043259
+  controller "roboai_controller"
+}
+RectangleArena {
 }

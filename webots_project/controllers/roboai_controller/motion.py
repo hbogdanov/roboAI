@@ -1,6 +1,5 @@
-from typing import Tuple
 from controller import Robot
-from .config import TIME_STEP_MS, FORWARD_SPEED, TURN_SPEED, SECS_PER_DEG
+from config import TIME_STEP_MS, FORWARD_SPEED, TURN_SPEED, SECS_PER_DEG
 
 class Drive:
     def __init__(self, robot: Robot, left_name: str, right_name: str):

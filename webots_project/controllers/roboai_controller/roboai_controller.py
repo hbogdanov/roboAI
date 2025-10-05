@@ -1,35 +1,61 @@
-from controller import Robot 
+from controller import Robot
 from config import TIME_STEP_MS, LEFT_MOTOR_NAME, RIGHT_MOTOR_NAME
 from motion import Drive
 from sensors import Sensors
 from logger import RunLogger
+from state import StateEstimator
+from planner_text import get_plan
+from executor import PlanExecutor
+
+RUN_SECONDS = 40.0
+COMMAND = "Go forward for 3 seconds, turn left 90, scan, then stop."
 
 def main():
-    print("roboai_controller loaded")
+    print("roboai_controller (SPA + planners) loaded")
     robot = Robot()
     log = RunLogger()
 
-    # Initialize hardware helpers
-    drive = Drive(robot, LEFT_MOTOR_NAME, RIGHT_MOTOR_NAME)
     sensors = Sensors(robot)
+    drive = Drive(robot, LEFT_MOTOR_NAME, RIGHT_MOTOR_NAME)
+    est = StateEstimator()
 
-    # Simple demo sequence
-    log.event(msg="starting demo")
-    drive.forward(2.0)
-    log.event(op="forward", seconds=2.0)
+    # High-level plan
+    plan = get_plan(COMMAND)
+    print("Plan:", plan)
+    log.event(op="plan_built", command=COMMAND, plan=plan)
 
-    drive.turn_left_deg(90)
-    log.event(op="turn", dir="left", deg=90)
+    execu = PlanExecutor(robot, drive, sensors, log)
+    execu.load(plan)
 
-    # Drive forward while reading optional distance sensor for ~3s
-    drive.set_velocity(2.0, 2.0)
+    dt = TIME_STEP_MS / 1000.0
     elapsed = 0.0
-    while elapsed < 3.0:
+    while elapsed < RUN_SECONDS:
         if robot.step(TIME_STEP_MS) == -1:
             break
-        dist = sensors.read_front_distance()
-        log.event(op="tick", dist=dist)
-        elapsed += TIME_STEP_MS / 1000.0
+
+        # Sense
+        ir = sensors.read_ir()
+        enc = sensors.read_encoders()
+
+        # State
+        state = est.update(enc, dt)
+
+        # Plan + Act
+        done = execu.step(dt, ir)
+
+        # Log tick state
+        lcmd, rcmd = execu.last_cmd
+        log.event(
+            op="spa_tick",
+            x=state.x, y=state.y, theta=state.theta,
+            vl=state.vl, vr=state.vr,
+            left_cmd=lcmd, right_cmd=rcmd
+        )
+
+        if done:
+            break
+
+        elapsed += dt
 
     drive.stop()
     log.event(op="stop")
