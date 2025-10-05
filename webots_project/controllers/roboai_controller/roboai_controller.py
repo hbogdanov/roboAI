@@ -1,14 +1,11 @@
-from controller import Robot
-from .config import (
-    TIME_STEP_MS,
-    LEFT_MOTOR_NAME,
-    RIGHT_MOTOR_NAME,
-)
-from .motion import Drive
-from .sensors import Sensors
-from .logger import RunLogger
+from controller import Robot 
+from config import TIME_STEP_MS, LEFT_MOTOR_NAME, RIGHT_MOTOR_NAME
+from motion import Drive
+from sensors import Sensors
+from logger import RunLogger
 
 def main():
+    print("roboai_controller loaded")
     robot = Robot()
     log = RunLogger()
 
@@ -33,10 +30,11 @@ def main():
         dist = sensors.read_front_distance()
         log.event(op="tick", dist=dist)
         elapsed += TIME_STEP_MS / 1000.0
+
     drive.stop()
     log.event(op="stop")
-
     log.close()
+    print("roboai_controller finished")
 
 if __name__ == "__main__":
     main()
