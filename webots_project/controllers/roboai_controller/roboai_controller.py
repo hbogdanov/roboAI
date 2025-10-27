@@ -6,6 +6,8 @@ from logger import RunLogger
 from state import StateEstimator
 from planner_text import get_plan
 from executor import PlanExecutor
+from sensors import LidarWrapper
+from occupancy_grid import OccupancyGrid
 
 RUN_SECONDS = 40.0
 COMMAND = "Go forward for 3 seconds, turn left 90, scan, then stop."
@@ -18,6 +20,9 @@ def main():
     sensors = Sensors(robot)
     drive = Drive(robot, LEFT_MOTOR_NAME, RIGHT_MOTOR_NAME)
     est = StateEstimator()
+
+    lidar = LidarWrapper(robot, name="LDS-01", timestep=TIME_STEP_MS)
+    occ_grid = OccupancyGrid(width_m=20.0, height_m=20.0, resolution=0.05)
 
     # High-level plan
     plan = get_plan(COMMAND)
@@ -39,6 +44,10 @@ def main():
 
         # State
         state = est.update(enc, dt)
+
+        ranges, angle_min, angle_inc, range_max = lidar.read_scan()
+        x, y, th = state.x, state.y, state.theta
+        occ_grid.update_from_scan((x, y, th), ranges, angle_min, angle_inc, range_max)
 
         # Plan + Act
         done = execu.step(dt, ir)

@@ -1,6 +1,7 @@
 from typing import List, Optional, TYPE_CHECKING
 from config import TIME_STEP_MS, EPUCK_IR_NAMES, LEFT_MOTOR_NAME, RIGHT_MOTOR_NAME
 from controller import Robot
+from controller import Lidar as _WebotsLidar
 
 class Sensors:
     def __init__(self, robot: "Robot"):
@@ -45,3 +46,23 @@ class Sensors:
 
     def read_front_distance(self) -> Optional[float]:
         return float(self.ir[0].getValue()) if (self.ir and self.ir[0] is not None) else None
+
+class LidarWrapper:
+    """
+    Simple 2D lidar reader for Webots.
+    Returns (ranges:list[float], angle_min:float, angle_inc:float, range_max:float).
+    """
+    def __init__(self, robot, name="LDS-01", timestep=32, enable_pointcloud=False):
+        self._lidar: _WebotsLidar = robot.getDevice(name)
+        self._lidar.enable(timestep)
+        if enable_pointcloud:
+            self._lidar.enablePointCloud()
+        self.fov = self._lidar.getFov()
+        self.res = self._lidar.getHorizontalResolution()
+        self.range_max = self._lidar.getMaxRange()
+
+    def read_scan(self):
+        ranges = list(self._lidar.getRangeImage())
+        angle_min = -self.fov / 2.0
+        angle_inc = self.fov / max(1, (self.res - 1))
+        return ranges, angle_min, angle_inc, self.range_max
