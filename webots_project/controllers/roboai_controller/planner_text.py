@@ -1,12 +1,13 @@
 from __future__ import annotations
 from typing import List, Dict, Any
-import json, re
+import json, re, os
 
 # A Plan is a JSON array of step dicts with specific ops.
 Plan = List[Dict[str, Any]]
 
-# Flip this to True to use the LLM path.
-USE_LLM = True
+# MVP default is deterministic primitive planning.
+# Set ROBOAI_USE_LLM=1 to enable FLAN-T5 planner path.
+USE_LLM = os.getenv("ROBOAI_USE_LLM", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 # Allowed ops and field normalization
 
@@ -97,8 +98,54 @@ def _safe_json_array(text: str) -> Plan:
 
 # Simple rule-based fallback
 
+def _task_abstraction_plan(t: str) -> Plan:
+    """
+    Compile a few high-level tasks to primitive actions.
+    Returns [] when no task abstraction phrase matches.
+    """
+    if "scan the room" in t or "scan room" in t:
+        return _validate_and_fix([
+            {"op": "scan", "sensor": "ir"},
+            {"op": "turn", "dir": "left", "deg": 90},
+            {"op": "scan", "sensor": "ir"},
+            {"op": "turn", "dir": "left", "deg": 90},
+            {"op": "scan", "sensor": "ir"},
+            {"op": "turn", "dir": "left", "deg": 90},
+            {"op": "scan", "sensor": "ir"},
+            {"op": "stop"},
+        ])
+
+    if "go forward and avoid obstacles" in t:
+        return _validate_and_fix([
+            {"op": "forward", "seconds": 4.0},
+            {"op": "stop"},
+        ])
+
+    m_patrol = re.search(r"patrol(?:\s+for)?\s+(\d+(?:\.\d+)?)\s*(?:sec|second|seconds|s)\b", t)
+    if "patrol" in t:
+        patrol_secs = float(m_patrol.group(1)) if m_patrol else 10.0
+        return _validate_and_fix([
+            {"op": "forward", "seconds": patrol_secs / 2.0},
+            {"op": "turn", "dir": "left", "deg": 180},
+            {"op": "forward", "seconds": patrol_secs / 2.0},
+            {"op": "stop"},
+        ])
+
+    if "return to base" in t or "return base" in t:
+        return _validate_and_fix([
+            {"op": "return_base"},
+            {"op": "stop"},
+        ])
+
+    return []
+
 def stub_plan(user_text: str) -> Plan:
     t = user_text.lower()
+
+    task_plan = _task_abstraction_plan(t)
+    if task_plan:
+        return task_plan
+
     plan: Plan = []
     # extract an inline seconds number for forward
     m = re.search(r"(\d+(?:\.\d+)?)\s*(sec|second|seconds|s)\b", t)

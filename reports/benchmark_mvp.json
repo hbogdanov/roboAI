@@ -1,0 +1,60 @@
+{
+  "summary": {
+    "runs": 4,
+    "command_success_rate": 75.0,
+    "path_completion_avg": 87.5,
+    "obstacle_avoidance_success_rate": 100.0,
+    "planning_parse_success_rate": 100.0,
+    "map_generation_output_rate": 0.0
+  },
+  "runs": [
+    {
+      "run": "run_20251005_161349.json",
+      "command": "Go forward for 3 seconds, turn left 90, scan, then stop.",
+      "planning_parse_success": true,
+      "path_completion": 1.0,
+      "command_success": true,
+      "obstacle_avoidance_success": true,
+      "max_front_level": 0.019,
+      "map_generation_output": false,
+      "distance_m": 0.112,
+      "events": 118
+    },
+    {
+      "run": "run_20251005_205036.json",
+      "command": "Go forward for 3 seconds, turn left 90, scan, then stop.",
+      "planning_parse_success": true,
+      "path_completion": 0.5,
+      "command_success": false,
+      "obstacle_avoidance_success": true,
+      "max_front_level": 0.019,
+      "map_generation_output": false,
+      "distance_m": 0.112,
+      "events": 103
+    },
+    {
+      "run": "run_20251005_205040.json",
+      "command": "Go forward for 3 seconds, turn left 90, scan, then stop.",
+      "planning_parse_success": true,
+      "path_completion": 1.0,
+      "command_success": true,
+      "obstacle_avoidance_success": true,
+      "max_front_level": 0.019,
+      "map_generation_output": false,
+      "distance_m": 0.112,
+      "events": 118
+    },
+    {
+      "run": "run_20251027_192949.json",
+      "command": "Go forward for 3 seconds, turn left 90, scan, then stop.",
+      "planning_parse_success": true,
+      "path_completion": 1.0,
+      "command_success": true,
+      "obstacle_avoidance_success": true,
+      "max_front_level": 0.019,
+      "map_generation_output": false,
+      "distance_m": 0.112,
+      "events": 119
+    }
+  ]
+}

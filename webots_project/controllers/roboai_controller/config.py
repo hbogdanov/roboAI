@@ -38,3 +38,5 @@ AXLE_LENGTH_M  = 0.053
 # Logs to <repo>/data/logs
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 LOG_DIR = os.path.join(REPO_ROOT, "data", "logs")
+REPORTS_DIR = os.path.join(REPO_ROOT, "reports")
+DEFAULT_COMMAND_FILE = os.path.join(REPO_ROOT, "demo", "mvp_command.txt")

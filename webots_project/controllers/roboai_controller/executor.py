@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import List, Dict, Optional, Tuple, Any
+import math
 from config import TIME_STEP_MS, SECS_PER_DEG, TURN_SPEED
 from logger import RunLogger
 from navigator import steer
@@ -28,6 +29,7 @@ class PlanExecutor:
         self.log = log
 
         self.plan: List[Dict[str, Any]] = []
+        self.constraints: Dict[str, Any] = {"speed_limit": 0.5, "avoid": []}
         self.idx = 0
         self.op_timer = 0.0
         self.turn_target_secs: Optional[float] = None
@@ -35,14 +37,15 @@ class PlanExecutor:
 
     # lifecycle
 
-    def load(self, plan: List[Dict[str, Any]]):
+    def load(self, plan: List[Dict[str, Any]], constraints: Optional[Dict[str, Any]] = None):
         """Load a new plan and reset state."""
         self.plan = plan or [{"op": "stop"}]
+        self.constraints = constraints or {"speed_limit": 0.5, "avoid": []}
         self.idx = 0
         self.op_timer = 0.0
         self.turn_target_secs = None
         self.last_cmd = (0.0, 0.0)
-        self.log.event(op="plan_loaded", steps=len(self.plan))
+        self.log.event(op="plan_loaded", steps=len(self.plan), constraints=self.constraints)
 
     def _wait_step(self) -> bool:
         """Advance Webots simulation by one controller tick. Returns True if simulation stopped."""
@@ -50,7 +53,10 @@ class PlanExecutor:
 
     # main tick
 
-    def step(self, dt: float, ir: List[Optional[float]]) -> bool:
+    def _wrap_pi(self, a: float) -> float:
+        return (a + math.pi) % (2.0 * math.pi) - math.pi
+
+    def step(self, dt: float, ir: List[Optional[float]], state=None) -> bool:
         """
         Execute one SPA tick. Returns True when the plan has finished or simulation ended.
         dt: timestep seconds
@@ -137,6 +143,71 @@ class PlanExecutor:
             self.idx = len(self.plan)
             self.last_cmd = (0.0, 0.0)
             return True
+
+        # GOTO (waypoint mode)
+        elif op == "goto":
+            if state is None:
+                self.log.event(op="goto_skip_no_state")
+                self.idx += 1
+                return self.idx >= len(self.plan)
+
+            tx = float(step.get("x", state.x))
+            ty = float(step.get("y", state.y))
+            dx = tx - float(state.x)
+            dy = ty - float(state.y)
+            dist = math.hypot(dx, dy)
+            if dist <= 0.08:
+                self.drive.stop()
+                self.last_cmd = (0.0, 0.0)
+                self.log.event(op="goto_done", x=tx, y=ty, dist=dist)
+                self.idx += 1
+                return self.idx >= len(self.plan)
+
+            desired = math.atan2(dy, dx)
+            err = self._wrap_pi(desired - float(state.theta))
+            speed_limit = float(self.constraints.get("speed_limit", 0.5))
+            base = max(0.2, min(1.8, speed_limit * 3.0))
+            k_turn = 1.6
+
+            # Reuse IR avoidance when front obstacle level is high.
+            l_avoid, r_avoid, front = steer(ir, base_speed=base)
+            if front >= 0.25:
+                l, r = l_avoid, r_avoid
+                self.log.event(op="collision_warning", front=front, mode="goto")
+            elif abs(err) > 0.28:
+                w = max(-base, min(base, k_turn * err))
+                l, r = -w, w
+            else:
+                corr = max(-base * 0.8, min(base * 0.8, k_turn * err))
+                l, r = base - corr, base + corr
+
+            self.drive.set_velocity(l, r)
+            self.last_cmd = (l, r)
+            self.log.event(op="goto_tick", x=state.x, y=state.y, tx=tx, ty=ty, dist=dist, err=err)
+
+        # FACE (waypoint mode)
+        elif op == "face":
+            if state is None:
+                self.log.event(op="face_skip_no_state")
+                self.idx += 1
+                return self.idx >= len(self.plan)
+
+            target_deg = float(step.get("theta_deg", 0.0))
+            target_rad = math.radians(target_deg)
+            err = self._wrap_pi(target_rad - float(state.theta))
+            if abs(err) <= 0.10:
+                self.drive.stop()
+                self.last_cmd = (0.0, 0.0)
+                self.log.event(op="face_done", theta_deg=target_deg, err=err)
+                self.idx += 1
+                return self.idx >= len(self.plan)
+
+            turn_v = max(0.3, min(1.8, abs(err) * 1.5))
+            l = -turn_v if err > 0 else turn_v
+            r = turn_v if err > 0 else -turn_v
+            self.drive.set_velocity(l, r)
+            self.last_cmd = (l, r)
+            self.log.event(op="face_tick", theta=state.theta, target_deg=target_deg, err=err)
 
         # UNKNOWN
         else:
