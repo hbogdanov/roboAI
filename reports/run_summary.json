@@ -1,30 +1,28 @@
 {
-  "run_file": "run_20260307_231555.json",
-  "runtime_s": 82.982,
-  "path_length_m": 0.509,
+  "run_file": "run_20260307_234422.json",
+  "runtime_s": 95.141,
+  "path_length_m": 0.699,
   "number_of_turns": 0,
   "number_of_scan_steps": 0,
-  "camera_marker_events": 123,
-  "goto_start_count": 10,
+  "camera_marker_events": 141,
+  "goto_start_count": 5,
   "goto_done_count": 0,
   "goto_success_ratio": 0.0,
-  "goto_stuck_count": 6,
-  "collision_burst_escape_count": 4,
+  "goto_stuck_count": 1,
+  "collision_burst_escape_count": 3,
   "replans_count": 0,
-  "goto_failed_count": 1,
-  "goto_fail_reasons": {
-    "no_progress": 1
-  },
-  "final_goal_error_m": 0.321,
-  "state_transitions": 45,
-  "avoid_time_s": 10.334,
+  "goto_failed_count": 0,
+  "goto_fail_reasons": {},
+  "final_goal_error_m": 0.147,
+  "state_transitions": 12,
+  "avoid_time_s": 4.891,
   "final_pose_confidence": 1.0,
-  "collision_warnings": 26,
+  "collision_warnings": 6,
   "max_front_level": 0.0,
   "final_pose": {
-    "x": 0.32,
-    "y": 0.2,
-    "theta": 1.479
+    "x": 0.268,
+    "y": 0.377,
+    "theta": 1.319
   },
-  "events_total": 2722
+  "events_total": 3018
 }

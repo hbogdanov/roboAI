@@ -201,7 +201,6 @@ class PlanExecutor:
         right_front_min = self._lidar_sector_min(ranges, angle_min, angle_inc, -35.0, 25.0, range_max)
 
         front_stop_m = 0.08
-        side_bias_m = 0.12
 
         # Hard stop/rotate when front sector is blocked.
         if front_min < front_stop_m:
@@ -228,25 +227,8 @@ class PlanExecutor:
                 "decision": decision,
             }
 
-        # Bias away from near-side obstacles before they become front collisions.
-        if left_front_min < side_bias_m and right_front_min >= side_bias_m:
-            l = min(1.8, base * 1.25)
-            r = max(0.1, base * 0.55)
-            return l, r, {
-                "front_min_m": front_min,
-                "left_front_min_m": left_front_min,
-                "right_front_min_m": right_front_min,
-                "decision": "left_blocked_bias_right",
-            }
-        if right_front_min < side_bias_m and left_front_min >= side_bias_m:
-            l = max(0.1, base * 0.55)
-            r = min(1.8, base * 1.25)
-            return l, r, {
-                "front_min_m": front_min,
-                "left_front_min_m": left_front_min,
-                "right_front_min_m": right_front_min,
-                "decision": "right_blocked_bias_left",
-            }
+        # In narrow passages, do not side-bias off corridor walls.
+        # Let path tracking handle steering unless the front is truly blocked.
         return None
 
     def _record_nav_failure(self, mode: str, reason: str, tx: float, ty: float, extra: Optional[Dict[str, Any]] = None):

@@ -10,13 +10,13 @@
       "avg_path_efficiency": 1.772
     },
     "world_office": {
-      "trials": 19,
-      "success_rate": 36.8,
-      "avg_final_goal_error_m": 0.302,
+      "trials": 26,
+      "success_rate": 26.9,
+      "avg_final_goal_error_m": 0.325,
       "avg_replans": 0,
-      "avg_runtime_s": 20.339,
-      "avg_collision_count": 6,
-      "avg_path_efficiency": 171.856
+      "avg_runtime_s": 47.116,
+      "avg_collision_count": 9.962,
+      "avg_path_efficiency": 126.438
     },
     "world_empty": {
       "trials": 0,
@@ -367,6 +367,76 @@
       "runtime_s": 82.98181891441345,
       "collision_count": 30,
       "path_efficiency": 1.1791995546202625
+    },
+    {
+      "run": "run_20260307_232516.json",
+      "world": "world_office",
+      "success": false,
+      "final_goal_error_m": 0.5078552132132095,
+      "replans": 0,
+      "runtime_s": 19.516692399978638,
+      "collision_count": 23,
+      "path_efficiency": 5.135621848838937
+    },
+    {
+      "run": "run_20260307_232623.json",
+      "world": "world_office",
+      "success": false,
+      "final_goal_error_m": 0.5078552132132095,
+      "replans": 0,
+      "runtime_s": 19.608296394348145,
+      "collision_count": 23,
+      "path_efficiency": 5.135621848838937
+    },
+    {
+      "run": "run_20260307_232810.json",
+      "world": "world_office",
+      "success": false,
+      "final_goal_error_m": 0.5083525361841592,
+      "replans": 0,
+      "runtime_s": 492.8430345058441,
+      "collision_count": 9,
+      "path_efficiency": 5.213129836496136
+    },
+    {
+      "run": "run_20260307_233627.json",
+      "world": "world_office",
+      "success": false,
+      "final_goal_error_m": 0.5707060669506133,
+      "replans": 0,
+      "runtime_s": 33.00446105003357,
+      "collision_count": 42,
+      "path_efficiency": 3.730515710996636
+    },
+    {
+      "run": "run_20260307_233756.json",
+      "world": "world_office",
+      "success": false,
+      "final_goal_error_m": 0.3205262754366962,
+      "replans": 0,
+      "runtime_s": 83.14706540107727,
+      "collision_count": 30,
+      "path_efficiency": 1.1791995546202625
+    },
+    {
+      "run": "run_20260307_234205.json",
+      "world": "world_office",
+      "success": false,
+      "final_goal_error_m": 0.1466757759958901,
+      "replans": 0,
+      "runtime_s": 95.3233630657196,
+      "collision_count": 9,
+      "path_efficiency": 0.8593282297513712
+    },
+    {
+      "run": "run_20260307_234422.json",
+      "world": "world_office",
+      "success": false,
+      "final_goal_error_m": 0.1466757759958901,
+      "replans": 0,
+      "runtime_s": 95.14060091972351,
+      "collision_count": 9,
+      "path_efficiency": 0.8593282297513712
     }
   ]
 }
