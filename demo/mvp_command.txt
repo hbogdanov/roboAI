@@ -1,1 +1,1 @@
-Go forward for 3 seconds, turn left 90, scan, then stop.
+go to the door and face 90 degrees

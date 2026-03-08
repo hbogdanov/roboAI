@@ -10,17 +10,22 @@ from config import (
     LEFT_MOTOR_NAME,
     RIGHT_MOTOR_NAME,
     DEFAULT_COMMAND_FILE,
+    DEFAULT_MODE_FILE,
     REPORTS_DIR,
 )
 from motion import Drive
 from sensors import Sensors
+from sensors import CameraWrapper
 from logger import RunLogger
 from state import StateEstimator
 from planner_text import get_plan
 from waypoint_planner import get_waypoint_plan
 from executor import PlanExecutor
+from waypoint_planner import GOAL_LIBRARY
 from sensors import LidarWrapper
 from occupancy_grid import OccupancyGrid
+from pose_fusion import PoseFusion
+from perception import detect_color_marker_bgra
 
 RUN_SECONDS = 40.0
 DEFAULT_COMMAND = "Go forward for 3 seconds, turn left 90, scan, then stop."
@@ -54,6 +59,54 @@ def resolve_command() -> str:
             return file_cmd
 
     return DEFAULT_COMMAND
+
+
+def infer_plan_mode(command: str) -> str:
+    t = command.lower()
+    waypoint_hints = [
+        "go to",
+        "goto",
+        "face",
+        "station",
+        "charging dock",
+        "door",
+        "explore",
+        "build a map",
+    ]
+    if any(k in t for k in waypoint_hints):
+        return "waypoint"
+    return "primitive"
+
+
+def resolve_plan_mode(command: str) -> str:
+    """
+    Plan mode precedence:
+      1) --plan-mode primitive|waypoint
+      2) ROBOAI_PLAN_MODE env var
+      3) --mode-file <path> (or default demo/mvp_mode.txt)
+      4) infer from command text
+    """
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--plan-mode", type=str, default="")
+    parser.add_argument("--mode-file", type=str, default=DEFAULT_MODE_FILE)
+    args, _ = parser.parse_known_args(sys.argv[1:])
+
+    cli_mode = (args.plan_mode or "").strip().lower()
+    if cli_mode in {"primitive", "waypoint"}:
+        return cli_mode
+
+    env_mode = os.getenv("ROBOAI_PLAN_MODE", "").strip().lower()
+    if env_mode in {"primitive", "waypoint"}:
+        return env_mode
+
+    mode_file = (args.mode_file or "").strip()
+    if mode_file and os.path.exists(mode_file):
+        with open(mode_file, "r", encoding="utf-8") as f:
+            file_mode = f.read().strip().lower()
+        if file_mode in {"primitive", "waypoint"}:
+            return file_mode
+
+    return infer_plan_mode(command)
 
 
 def write_demo_artifact(command: str, plan, log_path: str):
@@ -100,12 +153,26 @@ def write_explanation_artifact(command: str, plan_type: str, plan_steps, events)
         "## Execution Evidence",
         f"- `plan_built`: `{counts.get('plan_built', 0)}`",
         f"- `plan_loaded`: `{counts.get('plan_loaded', 0)}`",
+        f"- `state_transition`: `{counts.get('state_transition', 0)}`",
         f"- `spa_tick`: `{counts.get('spa_tick', 0)}`",
         f"- `turn_done`: `{counts.get('turn_done', 0)}`",
         f"- `scan`: `{counts.get('scan', 0)}`",
         f"- `goto_done`: `{counts.get('goto_done', 0)}`",
+        f"- `goto_start`: `{counts.get('goto_start', 0)}`",
+        f"- `goto_progress`: `{counts.get('goto_progress', 0)}`",
+        f"- `goto_stuck`: `{counts.get('goto_stuck', 0)}`",
+        f"- `goto_recovery_tick`: `{counts.get('goto_recovery_tick', 0)}`",
+        f"- `path_planned`: `{counts.get('path_planned', 0)}`",
+        f"- `path_plan_failed`: `{counts.get('path_plan_failed', 0)}`",
+        f"- `frontier_detected`: `{counts.get('frontier_detected', 0)}`",
+        f"- `frontier_selected`: `{counts.get('frontier_selected', 0)}`",
+        f"- `frontier_reached`: `{counts.get('frontier_reached', 0)}`",
+        f"- `explore_done`: `{counts.get('explore_done', 0)}`",
         f"- `face_done`: `{counts.get('face_done', 0)}`",
+        f"- `pose_correction`: `{counts.get('pose_correction', 0)}`",
+        f"- `camera_marker`: `{counts.get('camera_marker', 0)}`",
         f"- `collision_warning`: `{counts.get('collision_warning', 0)}`",
+        f"- `collision_burst_escape`: `{counts.get('collision_burst_escape', 0)}`",
         f"- `stop`: `{counts.get('stop', 0)}`",
         "",
         "## Summary",
@@ -180,9 +247,7 @@ def main():
     print("roboai_controller (MVP primitive planner) loaded")
     command = resolve_command()
     print("Command:", command)
-    plan_mode = os.getenv("ROBOAI_PLAN_MODE", "primitive").strip().lower()
-    if plan_mode not in {"primitive", "waypoint"}:
-        plan_mode = "primitive"
+    plan_mode = resolve_plan_mode(command)
     print("Plan mode:", plan_mode)
 
     robot = Robot()
@@ -191,8 +256,10 @@ def main():
     sensors = Sensors(robot)
     drive = Drive(robot, LEFT_MOTOR_NAME, RIGHT_MOTOR_NAME)
     est = StateEstimator()
+    fusion = PoseFusion()
 
     lidar = LidarWrapper(robot, name="LDS-01", timestep=TIME_STEP_MS)
+    camera = CameraWrapper(robot, name="camera", timestep=TIME_STEP_MS)
     occ_grid = OccupancyGrid(width_m=20.0, height_m=20.0, resolution=0.05)
 
     # High-level plan
@@ -211,6 +278,7 @@ def main():
 
     dt = TIME_STEP_MS / 1000.0
     elapsed = 0.0
+    tick = 0
     while elapsed < RUN_SECONDS:
         if robot.step(TIME_STEP_MS) == -1:
             break
@@ -226,8 +294,30 @@ def main():
         x, y, th = state.x, state.y, state.theta
         occ_grid.update_from_scan((x, y, th), ranges, angle_min, angle_inc, range_max)
 
+        # Optional camera-based marker detection.
+        if camera.available() and (tick % 10 == 0):
+            img, w, h = camera.read_image()
+            det = detect_color_marker_bgra(img, w, h)
+            log.event(op="camera_marker", **det)
+
         # Plan + Act
-        done = execu.step(dt, ir, state=state)
+        done = execu.step(dt, ir, state=state, occ_grid=occ_grid)
+
+        # Optional landmark correction when a named goal is reached.
+        reached = execu.last_goal_reached
+        if reached is not None:
+            goal_name = reached.get("goal")
+            landmark_xy = GOAL_LIBRARY.get(goal_name) if isinstance(goal_name, str) else None
+            corr = fusion.maybe_correct_with_landmark(state=state, landmark_xy=landmark_xy)
+            log.event(op="pose_correction", goal=goal_name, **corr)
+            execu.last_goal_reached = None
+
+        pose_conf = fusion.update_confidence(
+            dt=dt,
+            encoders_available=(enc is not None),
+            lidar_ranges_count=len(ranges),
+            wheel_speed_mag=abs(state.vl) + abs(state.vr),
+        )
 
         # Log tick state
         lcmd, rcmd = execu.last_cmd
@@ -235,13 +325,16 @@ def main():
             op="spa_tick",
             x=state.x, y=state.y, theta=state.theta,
             vl=state.vl, vr=state.vr,
-            left_cmd=lcmd, right_cmd=rcmd
+            left_cmd=lcmd, right_cmd=rcmd,
+            pose_confidence=pose_conf,
+            behavior_state=execu.behavior_state,
         )
 
         if done:
             break
 
         elapsed += dt
+        tick += 1
 
     drive.stop()
     log.event(op="stop")

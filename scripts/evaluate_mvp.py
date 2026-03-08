@@ -6,13 +6,16 @@ from collections import Counter
 from statistics import mean
 
 
-ALLOWED_OPS = {"forward", "turn", "scan", "return_base", "wait", "stop"}
+ALLOWED_OPS = {"forward", "turn", "scan", "return_base", "wait", "stop", "goto", "face", "explore"}
 STEP_TO_EVENT = {
     "forward": "forward_done",
     "turn": "turn_done",
     "scan": "scan",
     "return_base": "return_base",
     "wait": "wait_done",
+    "goto": "goto_done",
+    "face": "face_done",
+    "explore": "explore_done",
     "stop": "stop",
 }
 

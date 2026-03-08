@@ -38,11 +38,20 @@ def summarize_run(path: str, collision_warn_thresh: float = 0.25):
 
     turns = int(c.get("turn_start", 0))
     scans = int(c.get("scan", 0))
+    camera_markers = int(c.get("camera_marker", 0))
+    goto_starts = int(c.get("goto_start", 0))
+    goto_done = int(c.get("goto_done", 0))
 
     fw_ticks = [e for e in events if e.get("op") == "spa_forward_tick"]
     collision_warnings = sum(float(e.get("front", 0.0)) >= collision_warn_thresh for e in fw_ticks)
     collision_warnings += int(c.get("collision_warning", 0))
     max_front = max([float(e.get("front", 0.0)) for e in fw_ticks], default=0.0)
+    goto_progress = [e for e in events if e.get("op") == "goto_progress"]
+    final_goal_error = float(goto_progress[-1].get("goal_error_m", 0.0)) if goto_progress else 0.0
+    state_transitions = int(c.get("state_transition", 0))
+    spa_ticks = [e for e in events if e.get("op") == "spa_tick"]
+    pose_conf = [float(e.get("pose_confidence")) for e in spa_ticks if "pose_confidence" in e]
+    final_pose_conf = pose_conf[-1] if pose_conf else 0.0
 
     return {
         "run_file": os.path.basename(path),
@@ -50,6 +59,12 @@ def summarize_run(path: str, collision_warn_thresh: float = 0.25):
         "path_length_m": round(path_length_m, 3),
         "number_of_turns": turns,
         "number_of_scan_steps": scans,
+        "camera_marker_events": camera_markers,
+        "goto_start_count": goto_starts,
+        "goto_done_count": goto_done,
+        "final_goal_error_m": round(final_goal_error, 3),
+        "state_transitions": state_transitions,
+        "final_pose_confidence": round(final_pose_conf, 3),
         "collision_warnings": int(collision_warnings),
         "max_front_level": round(max_front, 3),
         "final_pose": {
@@ -71,6 +86,12 @@ def to_markdown(summary: dict) -> str:
         f"- Path length: **{summary['path_length_m']} m**",
         f"- Number of turns: **{summary['number_of_turns']}**",
         f"- Number of scan steps: **{summary['number_of_scan_steps']}**",
+        f"- Camera marker events: **{summary['camera_marker_events']}**",
+        f"- Goto starts: **{summary['goto_start_count']}**",
+        f"- Goto done: **{summary['goto_done_count']}**",
+        f"- Final goal error: **{summary['final_goal_error_m']} m**",
+        f"- State transitions: **{summary['state_transitions']}**",
+        f"- Final pose confidence: **{summary['final_pose_confidence']}**",
         f"- Collision warnings: **{summary['collision_warnings']}**",
         f"- Max front level: **{summary['max_front_level']}**",
         f"- Final pose: **x={fp['x']}, y={fp['y']}, theta={fp['theta']}**",

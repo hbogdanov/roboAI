@@ -2,6 +2,7 @@ from typing import List, Optional, TYPE_CHECKING
 from config import TIME_STEP_MS, EPUCK_IR_NAMES, LEFT_MOTOR_NAME, RIGHT_MOTOR_NAME
 from controller import Robot
 from controller import Lidar as _WebotsLidar
+from controller import Camera as _WebotsCamera
 
 class Sensors:
     def __init__(self, robot: "Robot"):
@@ -66,3 +67,26 @@ class LidarWrapper:
         angle_min = -self.fov / 2.0
         angle_inc = self.fov / max(1, (self.res - 1))
         return ranges, angle_min, angle_inc, self.range_max
+
+
+class CameraWrapper:
+    """
+    Optional Webots camera wrapper.
+    Returns raw BGRA bytes plus image size.
+    """
+    def __init__(self, robot, name="camera", timestep=32):
+        self._camera = None
+        try:
+            cam: _WebotsCamera = robot.getDevice(name)
+            cam.enable(timestep)
+            self._camera = cam
+        except Exception:
+            self._camera = None
+
+    def available(self) -> bool:
+        return self._camera is not None
+
+    def read_image(self):
+        if self._camera is None:
+            return None, 0, 0
+        return self._camera.getImage(), self._camera.getWidth(), self._camera.getHeight()
