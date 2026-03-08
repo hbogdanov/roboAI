@@ -106,6 +106,48 @@ def _nearest_free(start: GridPt, occ_mask) -> GridPt:
     return best
 
 
+def _reachable_mask(start: GridPt, occ_mask):
+    h, w = occ_mask.shape
+    sx, sy = start
+    out = [[False for _ in range(w)] for _ in range(h)]
+    if not _is_inside(sx, sy, w, h) or occ_mask[sy, sx]:
+        return out
+    q: List[GridPt] = [(sx, sy)]
+    out[sy][sx] = True
+    qi = 0
+    while qi < len(q):
+        cx, cy = q[qi]
+        qi += 1
+        for nx, ny, _ in _neighbors8(cx, cy):
+            if not _is_inside(nx, ny, w, h):
+                continue
+            if out[ny][nx]:
+                continue
+            if occ_mask[ny, nx]:
+                continue
+            out[ny][nx] = True
+            q.append((nx, ny))
+    return out
+
+
+def _nearest_reachable_goal(raw_goal: GridPt, goal_mask, reachable_mask) -> Optional[GridPt]:
+    gx, gy = raw_goal
+    h, w = goal_mask.shape
+    best: Optional[GridPt] = None
+    best_d = float("inf")
+    for y in range(h):
+        for x in range(w):
+            if goal_mask[y, x]:
+                continue
+            if not reachable_mask[y][x]:
+                continue
+            d = _heur((gx, gy), (x, y))
+            if d < best_d:
+                best_d = d
+                best = (x, y)
+    return best
+
+
 def astar_grid(start: GridPt, goal: GridPt, occ_mask) -> List[GridPt]:
     h, w = occ_mask.shape
     sx, sy = start
@@ -148,6 +190,48 @@ def astar_grid(start: GridPt, goal: GridPt, occ_mask) -> List[GridPt]:
     return path
 
 
+def _line_free(a: GridPt, b: GridPt, occ_mask) -> bool:
+    """
+    Grid line-of-sight check using integer interpolation.
+    Returns True if all sampled cells are traversable.
+    """
+    x0, y0 = a
+    x1, y1 = b
+    dx = x1 - x0
+    dy = y1 - y0
+    steps = max(abs(dx), abs(dy))
+    if steps == 0:
+        return not occ_mask[y0, x0]
+    for i in range(steps + 1):
+        t = float(i) / float(steps)
+        x = int(round(x0 + t * dx))
+        y = int(round(y0 + t * dy))
+        if occ_mask[y, x]:
+            return False
+    return True
+
+
+def _prune_path_los(path_grid: List[GridPt], occ_mask) -> List[GridPt]:
+    """
+    Keep only turning/essential points by skipping intermediate nodes
+    whenever direct line-of-sight is available.
+    """
+    if len(path_grid) <= 2:
+        return path_grid
+    out = [path_grid[0]]
+    i = 0
+    n = len(path_grid)
+    while i < n - 1:
+        j = n - 1
+        while j > i + 1:
+            if _line_free(path_grid[i], path_grid[j], occ_mask):
+                break
+            j -= 1
+        out.append(path_grid[j])
+        i = j
+    return out
+
+
 def plan_world_path(
     occ_grid,
     start_xy: Tuple[float, float],
@@ -155,7 +239,9 @@ def plan_world_path(
     block_unknown: bool = True,
     inflate_cells: int = 2,
     goal_clearance_cells: int = 0,
+    max_goal_snap_cells: int = 6,
     return_meta: bool = False,
+    smooth_path: bool = True,
 ) -> Any:
     """
     Compute an A* path in occupancy grid and return world-space waypoints.
@@ -175,6 +261,7 @@ def plan_world_path(
         inflate_cells=inflate_cells,
     )
     s_free = _nearest_free((sx, sy), occ_mask)
+    reachable_from_start = _reachable_mask(s_free, occ_mask)
 
     # For goal safety, optionally require extra clearance from occupied cells.
     if goal_clearance_cells > 0:
@@ -186,20 +273,36 @@ def plan_world_path(
             block_unknown=block_unknown,
             inflate_cells=inflate_cells + goal_clearance_cells,
         )
-        g_free = _nearest_free((gx, gy), goal_mask)
+        g_candidate = _nearest_reachable_goal((gx, gy), goal_mask, reachable_from_start)
+        g_free = g_candidate if g_candidate is not None else _nearest_free((gx, gy), goal_mask)
     else:
         g_free = _nearest_free((gx, gy), occ_mask)
 
     snapped = (g_free != (gx, gy))
+    snap_dist_cells = _heur((gx, gy), g_free)
+    if goal_clearance_cells > 0 and snapped and snap_dist_cells > float(max_goal_snap_cells):
+        if return_meta:
+            return [], {
+                "snapped_goal": True,
+                "goal_grid_raw": (gx, gy),
+                "goal_grid_used": g_free,
+                "fail_reason": "goal_blocked",
+            }
+        return []
     path_grid = astar_grid(s_free, g_free, occ_mask)
     if not path_grid:
+        fail_reason = "goal_blocked" if goal_clearance_cells > 0 else "unknown_path"
         if return_meta:
             return [], {
                 "snapped_goal": snapped,
                 "goal_grid_raw": (gx, gy),
                 "goal_grid_used": g_free,
+                "fail_reason": fail_reason,
             }
         return []
+
+    if smooth_path:
+        path_grid = _prune_path_los(path_grid, occ_mask)
 
     path_world = [occ_grid.grid_to_world(px, py) for (px, py) in path_grid]
     if return_meta:
@@ -207,5 +310,7 @@ def plan_world_path(
             "snapped_goal": snapped,
             "goal_grid_raw": (gx, gy),
             "goal_grid_used": g_free,
+            "smoothed": bool(smooth_path),
+            "fail_reason": "",
         }
     return path_world

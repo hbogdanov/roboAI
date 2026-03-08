@@ -82,12 +82,36 @@ def planner_settings_for_world(world_name: str) -> dict:
     wn = (world_name or "").strip().lower()
     # Office is cluttered: wider safety margin and goal clearance.
     if wn == "world_office":
-        return {"block_unknown": True, "inflate_cells": 5, "goal_clearance_cells": 2}
-    if wn == "world_obstacles":
-        return {"block_unknown": True, "inflate_cells": 4, "goal_clearance_cells": 1}
-    if wn == "world_empty":
-        return {"block_unknown": True, "inflate_cells": 2, "goal_clearance_cells": 0}
-    return {"block_unknown": True, "inflate_cells": 3, "goal_clearance_cells": 1}
+        cfg = {"block_unknown": True, "inflate_cells": 5, "goal_clearance_cells": 2, "max_goal_snap_cells": 6, "local_avoid_mode": "lidar", "replan_limit": 6}
+    elif wn == "world_obstacles":
+        cfg = {"block_unknown": True, "inflate_cells": 4, "goal_clearance_cells": 1, "max_goal_snap_cells": 8, "local_avoid_mode": "lidar", "replan_limit": 6}
+    elif wn == "world_empty":
+        cfg = {"block_unknown": True, "inflate_cells": 2, "goal_clearance_cells": 0, "max_goal_snap_cells": 12, "local_avoid_mode": "lidar", "replan_limit": 6}
+    else:
+        cfg = {"block_unknown": True, "inflate_cells": 3, "goal_clearance_cells": 1, "max_goal_snap_cells": 8, "local_avoid_mode": "lidar", "replan_limit": 6}
+
+    env_inflate = os.getenv("ROBOAI_INFLATE_CELLS", "").strip()
+    if env_inflate:
+        try:
+            cfg["inflate_cells"] = max(0, int(env_inflate))
+        except Exception:
+            pass
+    env_clear = os.getenv("ROBOAI_GOAL_CLEARANCE_CELLS", "").strip()
+    if env_clear:
+        try:
+            cfg["goal_clearance_cells"] = max(0, int(env_clear))
+        except Exception:
+            pass
+    env_snap = os.getenv("ROBOAI_MAX_GOAL_SNAP_CELLS", "").strip()
+    if env_snap:
+        try:
+            cfg["max_goal_snap_cells"] = max(1, int(env_snap))
+        except Exception:
+            pass
+    env_avoid = os.getenv("ROBOAI_LOCAL_AVOID_MODE", "").strip().lower()
+    if env_avoid in {"lidar", "ir"}:
+        cfg["local_avoid_mode"] = env_avoid
+    return cfg
 
 
 def resolve_plan_mode(command: str) -> str:
@@ -170,15 +194,21 @@ def write_explanation_artifact(command: str, plan_type: str, plan_steps, events)
         f"- `turn_done`: `{counts.get('turn_done', 0)}`",
         f"- `scan`: `{counts.get('scan', 0)}`",
         f"- `goto_done`: `{counts.get('goto_done', 0)}`",
+        f"- `goto_failed`: `{counts.get('goto_failed', 0)}`",
+        f"- `goto_abort`: `{counts.get('goto_abort', 0)}`",
         f"- `goto_start`: `{counts.get('goto_start', 0)}`",
         f"- `goto_progress`: `{counts.get('goto_progress', 0)}`",
         f"- `goto_stuck`: `{counts.get('goto_stuck', 0)}`",
         f"- `goto_recovery_tick`: `{counts.get('goto_recovery_tick', 0)}`",
         f"- `path_planned`: `{counts.get('path_planned', 0)}`",
         f"- `path_plan_failed`: `{counts.get('path_plan_failed', 0)}`",
+        f"- `goal_snapped`: `{counts.get('goal_snapped', 0)}`",
+        f"- `goal_clearance_checked`: `{counts.get('goal_clearance_checked', 0)}`",
+        f"- `lidar_avoid`: `{counts.get('lidar_avoid', 0)}`",
         f"- `frontier_detected`: `{counts.get('frontier_detected', 0)}`",
         f"- `frontier_selected`: `{counts.get('frontier_selected', 0)}`",
         f"- `frontier_reached`: `{counts.get('frontier_reached', 0)}`",
+        f"- `frontier_failed`: `{counts.get('frontier_failed', 0)}`",
         f"- `explore_done`: `{counts.get('explore_done', 0)}`",
         f"- `face_done`: `{counts.get('face_done', 0)}`",
         f"- `pose_correction`: `{counts.get('pose_correction', 0)}`",
@@ -333,7 +363,13 @@ def main():
             log.event(op="camera_marker", **det)
 
         # Plan + Act
-        done = execu.step(dt, ir, state=state, occ_grid=occ_grid)
+        done = execu.step(
+            dt,
+            ir,
+            state=state,
+            occ_grid=occ_grid,
+            lidar_scan=(ranges, angle_min, angle_inc, range_max),
+        )
 
         # Optional landmark correction when a named goal is reached.
         reached = execu.last_goal_reached

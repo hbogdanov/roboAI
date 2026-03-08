@@ -47,3 +47,9 @@ def test_task_abstraction_scan_room():
     plan = planner_text.stub_plan("scan the room")
     assert sum(1 for s in plan if s["op"] == "scan") >= 2
     assert plan[-1]["op"] == "stop"
+
+
+def test_return_to_base_task_compiles_to_return_base_step():
+    plan = planner_text.stub_plan("return to base")
+    assert any(s["op"] == "return_base" for s in plan)
+    assert plan[-1]["op"] == "stop"

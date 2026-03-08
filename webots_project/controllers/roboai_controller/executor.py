@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List, Dict, Optional, Tuple, Any
 import math
 
-from config import SECS_PER_DEG, TURN_SPEED
+from config import TURN_SPEED
 from logger import RunLogger
 from navigator import steer
 from path_planner import plan_world_path
@@ -38,7 +38,8 @@ class PlanExecutor:
         self.constraints: Dict[str, Any] = {"speed_limit": 0.5, "avoid": []}
         self.idx = 0
         self.op_timer = 0.0
-        self.turn_target_secs: Optional[float] = None
+        self._turn_target_theta: Optional[float] = None
+        self._turn_tol_rad: float = 0.07
         self.last_cmd: Tuple[float, float] = (0.0, 0.0)
 
         # Shared navigation state for goto/explore.
@@ -61,27 +62,45 @@ class PlanExecutor:
         self._planner_cfg: Dict[str, Any] = {
             "inflate_cells": 2,
             "goal_clearance_cells": 0,
+            "max_goal_snap_cells": 6,
             "block_unknown": True,
+            "local_avoid_mode": "lidar",
         }
+        self._home_pose: Optional[Tuple[float, float, float]] = None
+        self._nav_replan_attempts: int = 0
+        self._nav_replan_limit: int = 6
+        self._nav_no_progress_events: int = 0
+        self._nav_collision_burst_events: int = 0
+        self._last_nav_fail_reason: Optional[str] = None
 
     def load(self, plan: List[Dict[str, Any]], constraints: Optional[Dict[str, Any]] = None):
         self.plan = plan or [{"op": "stop"}]
         self.constraints = constraints or {"speed_limit": 0.5, "avoid": []}
         self.idx = 0
         self.op_timer = 0.0
-        self.turn_target_secs = None
+        self._turn_target_theta = None
         self.last_cmd = (0.0, 0.0)
         self._reset_nav_state()
         self._frontier_target = None
         self._frontier_refresh_timer = 0.0
         self.last_goal_reached = None
         self._collision_burst = 0.0
+        self._home_pose = None
+        self._nav_replan_attempts = 0
+        self._nav_replan_limit = 6
+        self._nav_no_progress_events = 0
+        self._nav_collision_burst_events = 0
+        self._last_nav_fail_reason = None
         planner_cfg = self.constraints.get("planner", {}) if isinstance(self.constraints, dict) else {}
         self._planner_cfg = {
             "inflate_cells": int(planner_cfg.get("inflate_cells", 2)),
             "goal_clearance_cells": int(planner_cfg.get("goal_clearance_cells", 0)),
+            "max_goal_snap_cells": int(planner_cfg.get("max_goal_snap_cells", 6)),
             "block_unknown": bool(planner_cfg.get("block_unknown", True)),
+            "replan_limit": int(planner_cfg.get("replan_limit", 6)),
+            "local_avoid_mode": str(planner_cfg.get("local_avoid_mode", "lidar")).strip().lower(),
         }
+        self._nav_replan_limit = max(1, int(self._planner_cfg.get("replan_limit", 6)))
         self._set_state("PLAN", reason="plan_loaded")
         self.log.event(op="plan_loaded", steps=len(self.plan), constraints=self.constraints)
 
@@ -94,6 +113,10 @@ class PlanExecutor:
         self._nav_prev_goal_error = None
         self._nav_no_improve_s = 0.0
         self._recovery_s = 0.0
+        self._nav_replan_attempts = 0
+        self._nav_no_progress_events = 0
+        self._nav_collision_burst_events = 0
+        self._last_nav_fail_reason = None
 
     def _set_state(self, new_state: str, reason: str = ""):
         if self.behavior_state == new_state:
@@ -105,16 +128,135 @@ class PlanExecutor:
     def _wrap_pi(self, a: float) -> float:
         return (a + math.pi) % (2.0 * math.pi) - math.pi
 
+    def _capture_home_pose_if_needed(self, state):
+        if self._home_pose is not None or state is None:
+            return
+        self._home_pose = (float(state.x), float(state.y), float(state.theta))
+        self.log.event(
+            op="home_pose_set",
+            home_x=self._home_pose[0],
+            home_y=self._home_pose[1],
+            home_theta=self._home_pose[2],
+        )
+
+    def _lidar_sector_min(
+        self,
+        ranges: List[float],
+        angle_min: float,
+        angle_inc: float,
+        sector_center_deg: float,
+        sector_half_width_deg: float,
+        range_max: float,
+    ) -> float:
+        if not ranges:
+            return float(range_max)
+        center = math.radians(sector_center_deg)
+        half = math.radians(max(0.0, sector_half_width_deg))
+        vals: List[float] = []
+        min_valid = 0.07
+        for i, rv in enumerate(ranges):
+            try:
+                r = float(rv)
+            except Exception:
+                continue
+            if not math.isfinite(r) or r < min_valid:
+                continue
+            ang = float(angle_min) + float(i) * float(angle_inc)
+            err = self._wrap_pi(ang - center)
+            if abs(err) <= half:
+                vals.append(r)
+        if not vals:
+            return float(range_max)
+        vals.sort()
+        # Use a lower-percentile distance instead of raw min to reject speckle outliers.
+        idx = max(0, min(len(vals) - 1, int(0.2 * (len(vals) - 1))))
+        return float(vals[idx])
+
+    def _lidar_local_avoidance(
+        self,
+        lidar_scan: Optional[Tuple[List[float], float, float, float]],
+        base: float,
+    ) -> Optional[Tuple[float, float, Dict[str, Any]]]:
+        if lidar_scan is None:
+            return None
+        ranges, angle_min, angle_inc, range_max = lidar_scan
+        if not ranges:
+            return None
+
+        front_min = self._lidar_sector_min(ranges, angle_min, angle_inc, 0.0, 20.0, range_max)
+        left_front_min = self._lidar_sector_min(ranges, angle_min, angle_inc, 35.0, 25.0, range_max)
+        right_front_min = self._lidar_sector_min(ranges, angle_min, angle_inc, -35.0, 25.0, range_max)
+
+        front_stop_m = 0.14
+        side_bias_m = 0.12
+
+        # Hard stop/rotate when front sector is blocked.
+        if front_min < front_stop_m:
+            turn_v = max(0.8, min(1.8, base * 1.3))
+            if left_front_min <= right_front_min:
+                # Obstacle stronger on left-front, rotate right.
+                l, r = turn_v, -turn_v
+                decision = "front_blocked_turn_right"
+            else:
+                l, r = -turn_v, turn_v
+                decision = "front_blocked_turn_left"
+            return l, r, {
+                "front_min_m": front_min,
+                "left_front_min_m": left_front_min,
+                "right_front_min_m": right_front_min,
+                "decision": decision,
+            }
+
+        # Bias away from near-side obstacles before they become front collisions.
+        if left_front_min < side_bias_m and right_front_min >= side_bias_m:
+            l = min(1.8, base * 1.25)
+            r = max(0.1, base * 0.55)
+            return l, r, {
+                "front_min_m": front_min,
+                "left_front_min_m": left_front_min,
+                "right_front_min_m": right_front_min,
+                "decision": "left_blocked_bias_right",
+            }
+        if right_front_min < side_bias_m and left_front_min >= side_bias_m:
+            l = max(0.1, base * 0.55)
+            r = min(1.8, base * 1.25)
+            return l, r, {
+                "front_min_m": front_min,
+                "left_front_min_m": left_front_min,
+                "right_front_min_m": right_front_min,
+                "decision": "right_blocked_bias_left",
+            }
+        return None
+
+    def _record_nav_failure(self, mode: str, reason: str, tx: float, ty: float, extra: Optional[Dict[str, Any]] = None):
+        payload = {"op": "goto_failed", "mode": mode, "tx": tx, "ty": ty, "fail_reason": reason}
+        if extra:
+            payload.update(extra)
+        self.log.event(**payload)
+        self._last_nav_fail_reason = reason
+
     def _start_nav_if_needed(self, target_xy: Tuple[float, float], state, occ_grid, mode: str):
         if self._nav_target == target_xy and self._nav_mode == mode:
-            return
+            return True
         self._nav_target = target_xy
         self._nav_mode = mode
         self._nav_path = []
         self._nav_wp_idx = 0
         self._nav_started = True
+        self._nav_replan_attempts += 1
 
         tx, ty = target_xy
+        if self._nav_replan_attempts > self._nav_replan_limit:
+            self._record_nav_failure(
+                mode=mode,
+                reason="replan_limit",
+                tx=tx,
+                ty=ty,
+                extra={"attempt": self._nav_replan_attempts, "limit": self._nav_replan_limit},
+            )
+            self.drive.stop()
+            self.last_cmd = (0.0, 0.0)
+            return False
         if occ_grid is not None:
             try:
                 path_world, meta = plan_world_path(
@@ -124,6 +266,7 @@ class PlanExecutor:
                     block_unknown=bool(self._planner_cfg.get("block_unknown", True)),
                     inflate_cells=max(0, int(self._planner_cfg.get("inflate_cells", 2))),
                     goal_clearance_cells=max(0, int(self._planner_cfg.get("goal_clearance_cells", 0))),
+                    max_goal_snap_cells=max(1, int(self._planner_cfg.get("max_goal_snap_cells", 6))),
                     return_meta=True,
                 )
                 if path_world:
@@ -162,11 +305,47 @@ class PlanExecutor:
                             tx=tx,
                             ty=ty,
                         )
+                    self.log.event(
+                        op="goal_clearance_checked",
+                        mode=mode,
+                        tx=tx,
+                        ty=ty,
+                        goal_snapped=snapped_goal,
+                        goal_raw=raw_world,
+                        goal_used=used_world,
+                    )
+                else:
+                    fail_reason = str(meta.get("fail_reason", "")).strip() or "unknown_path"
+                    self._record_nav_failure(
+                        mode=mode,
+                        reason=fail_reason,
+                        tx=tx,
+                        ty=ty,
+                        extra={"attempt": self._nav_replan_attempts},
+                    )
+                    self.log.event(
+                        op="goal_clearance_checked",
+                        mode=mode,
+                        tx=tx,
+                        ty=ty,
+                        goal_snapped=bool(meta.get("snapped_goal", False)),
+                        goal_raw=meta.get("goal_grid_raw"),
+                        goal_used=meta.get("goal_grid_used"),
+                        fail_reason=fail_reason,
+                    )
+                    self._nav_target = None
+                    self._recovery_s = 0.4
+                    return False
             except Exception:
-                self.log.event(op="path_plan_failed", mode=mode, tx=tx, ty=ty)
+                self.log.event(op="path_plan_failed", mode=mode, tx=tx, ty=ty, fail_reason="unknown_path")
+                self._record_nav_failure(mode=mode, reason="unknown_path", tx=tx, ty=ty, extra={"attempt": self._nav_replan_attempts})
+                self._nav_target = None
+                self._recovery_s = 0.4
+                return False
 
         self.log.event(op="goto_start", mode=mode, tx=tx, ty=ty)
         self._set_state("NAVIGATE", reason=f"{mode}_start")
+        return True
 
     def _choose_nav_subtarget(self, state, target_xy: Tuple[float, float]) -> Tuple[float, float]:
         tx, ty = target_xy
@@ -184,12 +363,23 @@ class PlanExecutor:
             return self._nav_path[self._nav_wp_idx]
         return tx, ty
 
-    def _goto_control(self, state, ir, occ_grid, target_xy: Tuple[float, float], mode: str, dt: float, accept_radius: float) -> bool:
+    def _goto_control(
+        self,
+        state,
+        ir,
+        occ_grid,
+        target_xy: Tuple[float, float],
+        mode: str,
+        dt: float,
+        accept_radius: float,
+        lidar_scan: Optional[Tuple[List[float], float, float, float]] = None,
+    ) -> bool:
         """
         Closed-loop controller with explicit metrics/events.
         Returns True when target reached.
         """
-        self._start_nav_if_needed(target_xy, state=state, occ_grid=occ_grid, mode=mode)
+        if not self._start_nav_if_needed(target_xy, state=state, occ_grid=occ_grid, mode=mode):
+            return False
         tx, ty = target_xy
         tgt_x, tgt_y = self._choose_nav_subtarget(state=state, target_xy=target_xy)
 
@@ -230,30 +420,69 @@ class PlanExecutor:
         base = base_nom * goal_scale
         k_heading = 1.8
 
-        l_avoid, r_avoid, front = steer(ir, base_speed=base)
-        if front >= 0.25:
+        local_avoid_mode = str(self._planner_cfg.get("local_avoid_mode", "lidar")).strip().lower()
+        use_lidar_avoid = local_avoid_mode != "ir"
+        lidar_avoid = self._lidar_local_avoidance(lidar_scan=lidar_scan, base=base) if use_lidar_avoid else None
+        if lidar_avoid is not None:
+            l, r, lidar_meta = lidar_avoid
             self._collision_burst += 1.0
-            self._set_state("AVOID", reason=f"{mode}_front_obstacle")
-            l, r = l_avoid, r_avoid
-            self.log.event(op="collision_warning", front=front, mode=mode)
-            # If we keep colliding in a burst, force a short escape cycle.
-            if self._collision_burst >= 6.0:
+            self._set_state("AVOID", reason=f"{mode}_lidar_local_avoid")
+            self.log.event(op="lidar_avoid", mode=mode, **lidar_meta)
+            if self._collision_burst >= 8.0:
                 self.log.event(op="collision_burst_escape", mode=mode, burst=self._collision_burst, goal_error_m=goal_error)
+                self._nav_collision_burst_events += 1
+                if self._nav_collision_burst_events >= 3:
+                    self._record_nav_failure(
+                        mode=mode,
+                        reason="collision_burst",
+                        tx=tx,
+                        ty=ty,
+                        extra={"burst_events": self._nav_collision_burst_events},
+                    )
+                    self.drive.stop()
+                    self.last_cmd = (0.0, 0.0)
+                    return False
                 self._collision_burst = 0.0
                 self._recovery_s = 0.8
                 self._nav_target = None
                 return False
-        elif abs(heading_error) > 0.28:
-            self._collision_burst = max(0.0, self._collision_burst - 0.5)
-            self._set_state("NAVIGATE", reason=f"{mode}_heading_align")
-            w_lim = max(0.25, base)
-            w = max(-w_lim, min(w_lim, k_heading * heading_error))
-            l, r = -w, w
         else:
-            self._collision_burst = max(0.0, self._collision_burst - 0.75)
-            self._set_state("NAVIGATE", reason=f"{mode}_track")
-            corr = max(-base * 0.9, min(base * 0.9, k_heading * heading_error))
-            l, r = base - corr, base + corr
+            l_avoid, r_avoid, front = steer(ir, base_speed=base)
+            if front >= 0.25:
+                self._collision_burst += 1.0
+                self._set_state("AVOID", reason=f"{mode}_front_obstacle")
+                l, r = l_avoid, r_avoid
+                self.log.event(op="collision_warning", front=front, mode=mode)
+                # If we keep colliding in a burst, force a short escape cycle.
+                if self._collision_burst >= 6.0:
+                    self.log.event(op="collision_burst_escape", mode=mode, burst=self._collision_burst, goal_error_m=goal_error)
+                    self._nav_collision_burst_events += 1
+                    if self._nav_collision_burst_events >= 3:
+                        self._record_nav_failure(
+                            mode=mode,
+                            reason="collision_burst",
+                            tx=tx,
+                            ty=ty,
+                            extra={"burst_events": self._nav_collision_burst_events},
+                        )
+                        self.drive.stop()
+                        self.last_cmd = (0.0, 0.0)
+                        return False
+                    self._collision_burst = 0.0
+                    self._recovery_s = 0.8
+                    self._nav_target = None
+                    return False
+            elif abs(heading_error) > 0.28:
+                self._collision_burst = max(0.0, self._collision_burst - 0.5)
+                self._set_state("NAVIGATE", reason=f"{mode}_heading_align")
+                w_lim = max(0.25, base)
+                w = max(-w_lim, min(w_lim, k_heading * heading_error))
+                l, r = -w, w
+            else:
+                self._collision_burst = max(0.0, self._collision_burst - 0.75)
+                self._set_state("NAVIGATE", reason=f"{mode}_track")
+                corr = max(-base * 0.9, min(base * 0.9, k_heading * heading_error))
+                l, r = base - corr, base + corr
 
         self.drive.set_velocity(l, r)
         self.last_cmd = (l, r)
@@ -269,7 +498,19 @@ class PlanExecutor:
         self._nav_prev_goal_error = goal_error
 
         if self._nav_no_improve_s >= 3.0:
-            self.log.event(op="goto_stuck", mode=mode, goal_error_m=goal_error, no_improve_s=self._nav_no_improve_s)
+            self.log.event(op="goto_stuck", mode=mode, goal_error_m=goal_error, no_improve_s=self._nav_no_improve_s, fail_reason="no_progress")
+            self._nav_no_progress_events += 1
+            if self._nav_no_progress_events >= 3:
+                self._record_nav_failure(
+                    mode=mode,
+                    reason="no_progress",
+                    tx=tx,
+                    ty=ty,
+                    extra={"stuck_events": self._nav_no_progress_events, "goal_error_m": goal_error},
+                )
+                self.drive.stop()
+                self.last_cmd = (0.0, 0.0)
+                return False
             self._nav_no_improve_s = 0.0
             self._recovery_s = 0.6
             self._nav_target = None  # force replan after recovery
@@ -303,11 +544,19 @@ class PlanExecutor:
                 best = (px, py)
         return best
 
-    def step(self, dt: float, ir: List[Optional[float]], state=None, occ_grid=None) -> bool:
+    def step(
+        self,
+        dt: float,
+        ir: List[Optional[float]],
+        state=None,
+        occ_grid=None,
+        lidar_scan: Optional[Tuple[List[float], float, float, float]] = None,
+    ) -> bool:
         if self.idx >= len(self.plan):
             self.drive.stop()
             self.last_cmd = (0.0, 0.0)
             return True
+        self._capture_home_pose_if_needed(state)
 
         step = self.plan[self.idx]
         op = str(step.get("op", "")).lower()
@@ -326,24 +575,41 @@ class PlanExecutor:
                 self.op_timer = 0.0
 
         elif op == "turn":
-            if self.turn_target_secs is None:
-                deg = abs(float(step.get("deg", 90)))
-                self.turn_target_secs = max(0.0, SECS_PER_DEG * deg)
-                direction = str(step.get("dir", "left")).lower()
-                if direction == "left":
-                    self.drive.set_velocity(-TURN_SPEED, TURN_SPEED)
-                    self.last_cmd = (-TURN_SPEED, TURN_SPEED)
-                else:
-                    self.drive.set_velocity(TURN_SPEED, -TURN_SPEED)
-                    self.last_cmd = (TURN_SPEED, -TURN_SPEED)
-                self.log.event(op="turn_start", dir=direction, deg=deg, secs=self.turn_target_secs)
-            self.op_timer += dt
-            if self.op_timer >= (self.turn_target_secs or 0.0):
+            if state is None:
                 self.drive.stop()
-                self.log.event(op="turn_done")
+                self.last_cmd = (0.0, 0.0)
+                self.log.event(op="turn_skip_no_state")
                 self.idx += 1
-                self.op_timer = 0.0
-                self.turn_target_secs = None
+            else:
+                if self._turn_target_theta is None:
+                    deg = abs(float(step.get("deg", 90)))
+                    direction = str(step.get("dir", "left")).lower()
+                    signed_deg = deg if direction == "left" else -deg
+                    self._turn_target_theta = self._wrap_pi(float(state.theta) + math.radians(signed_deg))
+                    self.log.event(
+                        op="turn_start",
+                        dir=direction,
+                        deg=deg,
+                        start_theta=float(state.theta),
+                        target_theta=float(self._turn_target_theta),
+                        tolerance_rad=float(self._turn_tol_rad),
+                    )
+
+                err = self._wrap_pi(float(self._turn_target_theta) - float(state.theta))
+                if abs(err) <= self._turn_tol_rad:
+                    self.drive.stop()
+                    self.last_cmd = (0.0, 0.0)
+                    self.log.event(op="turn_done", err=err, target_theta=float(self._turn_target_theta))
+                    self.idx += 1
+                    self.op_timer = 0.0
+                    self._turn_target_theta = None
+                else:
+                    turn_v = max(0.35, min(TURN_SPEED, abs(err) * 1.8))
+                    l = -turn_v if err > 0 else turn_v
+                    r = turn_v if err > 0 else -turn_v
+                    self.drive.set_velocity(l, r)
+                    self.last_cmd = (l, r)
+                    self.log.event(op="turn_tick", err=err, target_theta=float(self._turn_target_theta))
 
         elif op == "scan":
             self._set_state("SCAN", reason="scan_step")
@@ -365,10 +631,34 @@ class PlanExecutor:
                 self.op_timer = 0.0
 
         elif op == "return_base":
-            self._set_state("RETURN_HOME", reason="return_base_step")
-            self.drive.stop()
+            self._set_state("RETURN_HOME", reason="return_base_compile")
             self.log.event(op="return_base")
-            self.idx += 1
+            if self._home_pose is None:
+                if state is not None:
+                    self._capture_home_pose_if_needed(state)
+                else:
+                    self.log.event(op="return_base_skip_no_home")
+                    self.idx += 1
+                    self.last_cmd = (0.0, 0.0)
+                    return self.idx >= len(self.plan)
+
+            home_x, home_y, home_theta = self._home_pose if self._home_pose is not None else (0.0, 0.0, 0.0)
+            face_deg = math.degrees(home_theta)
+            accept_radius = float(step.get("accept_radius", 0.12))
+            compiled = [
+                {"op": "goto", "x": float(home_x), "y": float(home_y), "goal": "home", "accept_radius": accept_radius},
+                {"op": "face", "theta_deg": float(face_deg)},
+                {"op": "stop"},
+            ]
+            self.plan = self.plan[: self.idx] + compiled + self.plan[self.idx + 1 :]
+            self._reset_nav_state()
+            self.log.event(
+                op="return_base_compiled",
+                home_x=float(home_x),
+                home_y=float(home_y),
+                home_theta=float(home_theta),
+                accept_radius=accept_radius,
+            )
             self.last_cmd = (0.0, 0.0)
 
         elif op == "goto":
@@ -388,10 +678,17 @@ class PlanExecutor:
                     mode="goto",
                     dt=dt,
                     accept_radius=accept_radius,
+                    lidar_scan=lidar_scan,
                 )
                 if reached:
                     self.last_goal_reached = {"x": tx, "y": ty, "goal": goal_name}
                     self.idx += 1
+                elif self._last_nav_fail_reason:
+                    self.log.event(op="goto_abort", mode="goto", tx=tx, ty=ty, fail_reason=self._last_nav_fail_reason)
+                    self.drive.stop()
+                    self.last_cmd = (0.0, 0.0)
+                    self.idx += 1
+                    self._reset_nav_state()
 
         elif op == "face":
             self._set_state("NAVIGATE", reason="face_step")
@@ -461,10 +758,15 @@ class PlanExecutor:
                         mode="explore",
                         dt=dt,
                         accept_radius=0.12,
+                        lidar_scan=lidar_scan,
                     )
                     if reached:
                         self.log.event(op="frontier_reached", x=self._frontier_target[0], y=self._frontier_target[1])
                         self._frontier_target = None
+                    elif self._last_nav_fail_reason:
+                        self.log.event(op="frontier_failed", fail_reason=self._last_nav_fail_reason)
+                        self._frontier_target = None
+                        self._reset_nav_state()
 
         elif op == "stop":
             self.drive.stop()

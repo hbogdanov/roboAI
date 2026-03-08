@@ -42,6 +42,15 @@ def test_explore_and_map_parse():
     assert explore["seconds"] == 12.0
 
 
+def test_door_scan_return_parse():
+    lib = dict(waypoint_planner.DEFAULT_GOAL_LIBRARY)
+    plan = waypoint_planner._fallback_waypoint_plan("go to the door, scan, and return to base", goal_library=lib)
+    ops = [s["op"] for s in plan["steps"]]
+    assert "goto" in ops
+    assert "scan" in ops
+    assert "return_base" in ops
+
+
 def test_world_specific_goal_file_load():
     lib, src = waypoint_planner.load_goal_library()
     assert isinstance(lib, dict)

@@ -114,6 +114,32 @@ Optional planning extras:
 2. Leave `demo/mvp_command.txt` as-is (or edit it).
 3. Run simulation.
 
+## Official Demos
+
+Demo 1: Goal navigation
+- Command: `go to station A and face 90 degrees`
+- Shows: NL parsing, semantic goal lookup, A* planning, waypoint following, heading alignment.
+- Select:
+```bash
+python scripts/select_demo.py --demo demo1
+```
+
+Demo 2: Explore and map
+- Command: `explore the room and build a map`
+- Shows: frontier selection, occupancy mapping, autonomous exploration.
+- Select:
+```bash
+python scripts/select_demo.py --demo demo2
+```
+
+Demo 3: Go, inspect, return
+- Command: `go to the door, scan, and return to base`
+- Shows: multi-step tasking, navigation, sensing, homing (`return_base` compiles to `goto(home)->face(home)->stop`).
+- Select:
+```bash
+python scripts/select_demo.py --demo demo3
+```
+
 ## Webots Scenario Matrix
 
 Available worlds:
@@ -146,6 +172,10 @@ Supervisor-based evaluation controller:
 
 Supervisor evaluation outputs:
 - `reports/supervisor_eval.json`
+
+World-batch metrics (from run logs):
+- `reports/world_batch_eval.md`
+- `reports/world_batch_eval.json`
 
 ## Practical Run + Debug Flow
 
@@ -206,6 +236,22 @@ Outputs:
 - `reports/benchmark_mvp.md`
 - `reports/benchmark_mvp.json`
 
+World-batch evaluation page:
+```bash
+python scripts/evaluate_world_batch.py
+```
+Outputs:
+- `reports/world_batch_eval.md`
+- `reports/world_batch_eval.json`
+
+Randomized-world experiment page:
+```bash
+python scripts/evaluate_randomization_experiment.py
+```
+Outputs:
+- `reports/randomization_experiment.md`
+- `reports/randomization_experiment.json`
+
 Run summary page:
 ```bash
 python scripts/log_summary.py
@@ -221,26 +267,85 @@ Working now:
 - Waypoint mode execution (`goto`/`face`/`wait`/`stop`).
 - Goal-directed semantic lookup (`station A`, `charging dock`, `door`).
 - A* path planning + waypoint path following for `goto`.
+- Line-of-sight path smoothing (waypoint pruning) on A* paths to reduce jagged steering.
 - Frontier exploration loop (`explore`) with nearest-frontier target selection.
 - Obstacle-aware local correction while tracking waypoint paths.
 - Occupancy map export.
 - Explanation artifact generation.
 - Benchmark and run-summary generation.
 
-Partial:
-- `return_base` is currently stubbed.
-- Turn calibration remains open-loop.
+Implemented:
+- Primitive `turn` uses heading-target closed-loop control (requested delta from current heading until angular error threshold).
+- `return_base` compiles to `goto(home_x, home_y)` -> `face(home_theta)` -> `stop` at runtime.
 
 Closed-loop `goto` logging:
 - `goto_start`
 - `goto_progress`
 - `goto_done`
+- `goto_failed` (`fail_reason` includes `unknown_path`, `goal_blocked`, `collision_burst`, `no_progress`, `replan_limit`)
 - `goal_error_m` (inside `goto_progress`/`goto_done`)
 
 Pose estimation language used in this repo:
 - Odometry + lidar-based map updates are implemented.
 - Optional landmark-based pose correction is implemented.
 - No EKF or full SLAM is claimed.
+
+## Batch Evaluation (20-Trial Target)
+
+Recommended automation target:
+- 20 trials per world across:
+  - `world_empty`
+  - `world_obstacles`
+  - `world_office`
+
+Supervisor run knobs:
+- `ROBOAI_SUPERVISOR_ENABLE=1`
+- `ROBOAI_EVAL_TRIALS=20`
+- `ROBOAI_EVAL_RUN_SECONDS=25`
+- `ROBOAI_EVAL_SEED=42`
+
+Track:
+- success rate
+- average final goal error
+- average replans
+- average runtime
+- collision count
+- path efficiency
+
+Result table format:
+
+| World | Trials | Success Rate | Avg Final Goal Error (m) | Avg Replans | Avg Runtime (s) | Avg Collisions | Avg Path Efficiency |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `world_empty` | 20 | TBD | TBD | TBD | TBD | TBD | TBD |
+| `world_obstacles` | 20 | TBD | TBD | TBD | TBD | TBD | TBD |
+| `world_office` | 20 | TBD | TBD | TBD | TBD | TBD | TBD |
+
+Aggregate existing logs into the same table schema:
+```bash
+python scripts/evaluate_world_batch.py
+```
+
+## Randomization Experiment
+
+Use generated randomized worlds and compare:
+1. obstacle inflation (`ROBOAI_INFLATE_CELLS`)
+2. local avoidance mode (`ROBOAI_LOCAL_AVOID_MODE=ir|lidar`)
+
+Example comparison settings:
+- low inflation: `ROBOAI_INFLATE_CELLS=2`
+- high inflation: `ROBOAI_INFLATE_CELLS=5`
+- IR-only: `ROBOAI_LOCAL_AVOID_MODE=ir`
+- lidar-assisted: `ROBOAI_LOCAL_AVOID_MODE=lidar`
+
+Randomized-world generation:
+```bash
+python scripts/generate_random_worlds.py --count 20 --seed 123
+```
+
+After collecting runs on randomized worlds, generate comparison tables:
+```bash
+python scripts/evaluate_randomization_experiment.py
+```
 
 ## Experimental Module
 

@@ -21,6 +21,11 @@ def summarize_run(path: str, collision_warn_thresh: float = 0.25):
         data = json.load(f)
     events = data.get("events", [])
     c = Counter(e.get("op") for e in events if "op" in e)
+    fail_reasons = Counter(
+        str(e.get("fail_reason", "")).strip()
+        for e in events
+        if e.get("op") == "goto_failed" and str(e.get("fail_reason", "")).strip()
+    )
 
     t_values = [float(e.get("t")) for e in events if "t" in e]
     runtime_s = (max(t_values) - min(t_values)) if len(t_values) >= 2 else 0.0
@@ -41,6 +46,10 @@ def summarize_run(path: str, collision_warn_thresh: float = 0.25):
     camera_markers = int(c.get("camera_marker", 0))
     goto_starts = int(c.get("goto_start", 0))
     goto_done = int(c.get("goto_done", 0))
+    goto_stuck = int(c.get("goto_stuck", 0))
+    collision_burst_escape = int(c.get("collision_burst_escape", 0))
+    path_planned = int(c.get("path_planned", 0))
+    replans = max(0, path_planned - goto_starts)
 
     fw_ticks = [e for e in events if e.get("op") == "spa_forward_tick"]
     collision_warnings = sum(float(e.get("front", 0.0)) >= collision_warn_thresh for e in fw_ticks)
@@ -50,8 +59,15 @@ def summarize_run(path: str, collision_warn_thresh: float = 0.25):
     final_goal_error = float(goto_progress[-1].get("goal_error_m", 0.0)) if goto_progress else 0.0
     state_transitions = int(c.get("state_transition", 0))
     spa_ticks = [e for e in events if e.get("op") == "spa_tick"]
+    avoid_time_s = 0.0
+    for a, b in zip(spa_ticks[:-1], spa_ticks[1:]):
+        if str(a.get("behavior_state", "")) == "AVOID":
+            ta = float(a.get("t", 0.0))
+            tb = float(b.get("t", 0.0))
+            avoid_time_s += max(0.0, tb - ta)
     pose_conf = [float(e.get("pose_confidence")) for e in spa_ticks if "pose_confidence" in e]
     final_pose_conf = pose_conf[-1] if pose_conf else 0.0
+    goto_success_ratio = (float(goto_done) / float(goto_starts)) if goto_starts > 0 else 1.0
 
     return {
         "run_file": os.path.basename(path),
@@ -62,8 +78,15 @@ def summarize_run(path: str, collision_warn_thresh: float = 0.25):
         "camera_marker_events": camera_markers,
         "goto_start_count": goto_starts,
         "goto_done_count": goto_done,
+        "goto_success_ratio": round(goto_success_ratio, 3),
+        "goto_stuck_count": goto_stuck,
+        "collision_burst_escape_count": collision_burst_escape,
+        "replans_count": replans,
+        "goto_failed_count": int(c.get("goto_failed", 0)),
+        "goto_fail_reasons": dict(fail_reasons),
         "final_goal_error_m": round(final_goal_error, 3),
         "state_transitions": state_transitions,
+        "avoid_time_s": round(avoid_time_s, 3),
         "final_pose_confidence": round(final_pose_conf, 3),
         "collision_warnings": int(collision_warnings),
         "max_front_level": round(max_front, 3),
@@ -89,8 +112,15 @@ def to_markdown(summary: dict) -> str:
         f"- Camera marker events: **{summary['camera_marker_events']}**",
         f"- Goto starts: **{summary['goto_start_count']}**",
         f"- Goto done: **{summary['goto_done_count']}**",
+        f"- Goto success ratio: **{summary['goto_success_ratio']}**",
+        f"- Goto stuck count: **{summary['goto_stuck_count']}**",
+        f"- Collision burst escapes: **{summary['collision_burst_escape_count']}**",
+        f"- Replans count: **{summary['replans_count']}**",
+        f"- Goto failed count: **{summary['goto_failed_count']}**",
+        f"- Goto fail reasons: **{summary['goto_fail_reasons']}**",
         f"- Final goal error: **{summary['final_goal_error_m']} m**",
         f"- State transitions: **{summary['state_transitions']}**",
+        f"- Time in AVOID: **{summary['avoid_time_s']} s**",
         f"- Final pose confidence: **{summary['final_pose_confidence']}**",
         f"- Collision warnings: **{summary['collision_warnings']}**",
         f"- Max front level: **{summary['max_front_level']}**",

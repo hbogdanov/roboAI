@@ -1,0 +1,1 @@
+go to the door, scan, and return to base

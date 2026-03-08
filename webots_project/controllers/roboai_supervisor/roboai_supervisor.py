@@ -3,6 +3,8 @@ import json
 import os
 import random
 import time
+import glob
+import math
 
 
 TIME_STEP = 64
@@ -13,6 +15,7 @@ ENABLE_EVAL = os.getenv("ROBOAI_SUPERVISOR_ENABLE", "0").strip().lower() in {"1"
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 OUT_DIR = os.path.join(REPO_ROOT, "reports")
 OUT_PATH = os.path.join(OUT_DIR, "supervisor_eval.json")
+LOG_DIR = os.path.join(REPO_ROOT, "data", "logs")
 
 
 OBSTACLE_DEFS = ["OBS1", "OBS2", "DESK_A", "DESK_B", "WALL_SEG"]
@@ -55,6 +58,7 @@ def _randomize_obstacles(supervisor: Supervisor):
 
 
 def _run_trial(supervisor: Supervisor, trial_id: int):
+    before = set(glob.glob(os.path.join(LOG_DIR, "run_*.json")))
     start_x = random.uniform(-0.45, 0.45)
     start_y = random.uniform(-0.45, 0.45)
     start_yaw = random.uniform(-3.14, 3.14)
@@ -69,13 +73,75 @@ def _run_trial(supervisor: Supervisor, trial_id: int):
             break
 
     duration = time.time() - start
-    # Conservative placeholders for collision/completion; these can be extended with contact checks.
+    after = set(glob.glob(os.path.join(LOG_DIR, "run_*.json")))
+    new_logs = sorted(list(after - before))
+    metrics = _read_trial_metrics(new_logs[-1]) if new_logs else {}
     return {
         "trial": trial_id,
         "start_pose": {"x": start_x, "y": start_y, "yaw": start_yaw},
         "duration_s": round(duration, 3),
-        "collision_detected": False,
-        "completed": True,
+        "collision_detected": bool(metrics.get("collision_count", 0) > 0),
+        "completed": bool(metrics.get("success", True)),
+        "metrics": metrics,
+    }
+
+
+def _read_trial_metrics(path: str):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+    events = data.get("events", [])
+    goto_start = sum(1 for e in events if e.get("op") == "goto_start")
+    goto_done = sum(1 for e in events if e.get("op") == "goto_done")
+    success = goto_start > 0 and goto_done >= goto_start
+    if goto_start == 0:
+        success = any(e.get("op") == "stop" for e in events)
+    replans = max(0, sum(1 for e in events if e.get("op") == "path_planned") - goto_start)
+    collisions = sum(1 for e in events if e.get("op") in {"collision_warning", "collision_burst_escape"})
+
+    tvals = [float(e.get("t")) for e in events if "t" in e]
+    runtime_s = (max(tvals) - min(tvals)) if len(tvals) >= 2 else 0.0
+
+    ticks = [e for e in events if e.get("op") == "spa_tick" and "x" in e and "y" in e]
+    path_len = 0.0
+    for a, b in zip(ticks[:-1], ticks[1:]):
+        dx = float(b["x"]) - float(a["x"])
+        dy = float(b["y"]) - float(a["y"])
+        path_len += math.hypot(dx, dy)
+    start_xy = (float(ticks[0]["x"]), float(ticks[0]["y"])) if ticks else None
+
+    plan_evt = next((e for e in events if e.get("op") == "plan_built"), {})
+    goal_xy = None
+    for s in plan_evt.get("plan", []) if isinstance(plan_evt.get("plan"), list) else []:
+        if str(s.get("op", "")).lower() == "goto":
+            try:
+                goal_xy = (float(s.get("x")), float(s.get("y")))
+            except Exception:
+                goal_xy = None
+            break
+    straight = 0.0
+    if start_xy is not None and goal_xy is not None:
+        straight = math.hypot(goal_xy[0] - start_xy[0], goal_xy[1] - start_xy[1])
+    path_eff = (straight / path_len) if path_len > 0.0 else 0.0
+
+    goal_err = 0.0
+    done = [e for e in events if e.get("op") == "goto_done"]
+    prog = [e for e in events if e.get("op") == "goto_progress"]
+    if done:
+        goal_err = float(done[-1].get("goal_error_m", 0.0))
+    elif prog:
+        goal_err = float(prog[-1].get("goal_error_m", 0.0))
+
+    return {
+        "log_file": os.path.basename(path),
+        "success": bool(success),
+        "final_goal_error_m": round(goal_err, 3),
+        "replans": int(replans),
+        "runtime_s": round(runtime_s, 3),
+        "collision_count": int(collisions),
+        "path_efficiency": round(path_eff, 3),
     }
 
 
@@ -101,6 +167,22 @@ def main():
             "trials": len(trials),
             "completion_rate": round(100.0 * sum(1 for t in trials if t["completed"]) / max(1, len(trials)), 1),
             "collision_rate": round(100.0 * sum(1 for t in trials if t["collision_detected"]) / max(1, len(trials)), 1),
+            "success_rate": round(100.0 * sum(1 for t in trials if t.get("metrics", {}).get("success")) / max(1, len(trials)), 1),
+            "avg_final_goal_error_m": round(
+                sum(float(t.get("metrics", {}).get("final_goal_error_m", 0.0)) for t in trials) / max(1, len(trials)), 3
+            ),
+            "avg_replans": round(
+                sum(float(t.get("metrics", {}).get("replans", 0.0)) for t in trials) / max(1, len(trials)), 3
+            ),
+            "avg_runtime_s": round(
+                sum(float(t.get("metrics", {}).get("runtime_s", 0.0)) for t in trials) / max(1, len(trials)), 3
+            ),
+            "avg_collision_count": round(
+                sum(float(t.get("metrics", {}).get("collision_count", 0.0)) for t in trials) / max(1, len(trials)), 3
+            ),
+            "avg_path_efficiency": round(
+                sum(float(t.get("metrics", {}).get("path_efficiency", 0.0)) for t in trials) / max(1, len(trials)), 3
+            ),
         },
     }
     with open(OUT_PATH, "w", encoding="utf-8") as f:

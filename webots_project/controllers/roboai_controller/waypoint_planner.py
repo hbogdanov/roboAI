@@ -176,6 +176,9 @@ def _fallback_waypoint_plan(command: str, goal_library: Dict[str, Tuple[float, f
         accept_radius = 0.14 if dst == "door" else 0.10
         steps.append({"op": "goto", "x": x, "y": y, "goal": dst, "accept_radius": accept_radius})
 
+    if "scan" in t:
+        steps.append({"op": "scan", "sensor": "ir"})
+
     m_face = re.search(r"face(?:\s+to)?\s*(-?\d+(?:\.\d+)?)", t)
     if not m_face:
         m_face = re.search(r"face(?:\s+to)?\s*(-?\d+(?:\.\d+)?)\s*(?:deg|degree|degrees)?", t)
@@ -188,6 +191,9 @@ def _fallback_waypoint_plan(command: str, goal_library: Dict[str, Tuple[float, f
         m_wait = re.search(r"(\d+(?:\.\d+)?)\s*(?:sec|second|seconds|s)\b", t)
         secs = float(m_wait.group(1)) if m_wait else 1.0
         steps.append({"op": "wait", "seconds": secs})
+
+    if "return to base" in t or "return base" in t or "return home" in t:
+        steps.append({"op": "return_base"})
 
     if not steps:
         steps = [{"op": "wait", "seconds": 1.0}]
