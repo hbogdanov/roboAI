@@ -12,7 +12,7 @@
     "x": 0.35,
     "y": 0.45,
     "goal": "station_a",
-    "accept_radius": 0.1
+    "accept_radius": 0.14
   },
   {
     "op": "face",

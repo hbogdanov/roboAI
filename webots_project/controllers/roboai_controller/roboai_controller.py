@@ -82,13 +82,45 @@ def planner_settings_for_world(world_name: str) -> dict:
     wn = (world_name or "").strip().lower()
     # Office is cluttered: wider safety margin and goal clearance.
     if wn == "world_office":
-        cfg = {"block_unknown": True, "inflate_cells": 5, "goal_clearance_cells": 2, "max_goal_snap_cells": 6, "local_avoid_mode": "lidar", "replan_limit": 6}
+        cfg = {
+            "block_unknown": True,
+            "inflate_cells": 2,
+            "goal_clearance_cells": 0,
+            "max_goal_snap_cells": 12,
+            "local_avoid_mode": "lidar",
+            "replan_limit": 6,
+            "path_stride": 2,
+        }
     elif wn == "world_obstacles":
-        cfg = {"block_unknown": True, "inflate_cells": 4, "goal_clearance_cells": 1, "max_goal_snap_cells": 8, "local_avoid_mode": "lidar", "replan_limit": 6}
+        cfg = {
+            "block_unknown": True,
+            "inflate_cells": 4,
+            "goal_clearance_cells": 1,
+            "max_goal_snap_cells": 8,
+            "local_avoid_mode": "lidar",
+            "replan_limit": 6,
+            "path_stride": 3,
+        }
     elif wn == "world_empty":
-        cfg = {"block_unknown": True, "inflate_cells": 2, "goal_clearance_cells": 0, "max_goal_snap_cells": 12, "local_avoid_mode": "lidar", "replan_limit": 6}
+        cfg = {
+            "block_unknown": True,
+            "inflate_cells": 2,
+            "goal_clearance_cells": 0,
+            "max_goal_snap_cells": 12,
+            "local_avoid_mode": "lidar",
+            "replan_limit": 6,
+            "path_stride": 4,
+        }
     else:
-        cfg = {"block_unknown": True, "inflate_cells": 3, "goal_clearance_cells": 1, "max_goal_snap_cells": 8, "local_avoid_mode": "lidar", "replan_limit": 6}
+        cfg = {
+            "block_unknown": True,
+            "inflate_cells": 3,
+            "goal_clearance_cells": 1,
+            "max_goal_snap_cells": 8,
+            "local_avoid_mode": "lidar",
+            "replan_limit": 6,
+            "path_stride": 3,
+        }
 
     env_inflate = os.getenv("ROBOAI_INFLATE_CELLS", "").strip()
     if env_inflate:
@@ -106,6 +138,12 @@ def planner_settings_for_world(world_name: str) -> dict:
     if env_snap:
         try:
             cfg["max_goal_snap_cells"] = max(1, int(env_snap))
+        except Exception:
+            pass
+    env_stride = os.getenv("ROBOAI_PATH_STRIDE", "").strip()
+    if env_stride:
+        try:
+            cfg["path_stride"] = max(1, int(env_stride))
         except Exception:
             pass
     env_avoid = os.getenv("ROBOAI_LOCAL_AVOID_MODE", "").strip().lower()

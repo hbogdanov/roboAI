@@ -173,7 +173,7 @@ def _fallback_waypoint_plan(command: str, goal_library: Dict[str, Tuple[float, f
     dst = _resolve_goal_name(t, goal_library=goal_library)
     if dst:
         x, y = goal_library[dst]
-        accept_radius = 0.14 if dst == "door" else 0.10
+        accept_radius = 0.14 if (dst == "door" or dst.startswith("station_")) else 0.10
         steps.append({"op": "goto", "x": x, "y": y, "goal": dst, "accept_radius": accept_radius})
 
     if "scan" in t:

@@ -1,6 +1,6 @@
 {
-  "run_file": "run_20260307_221715.json",
-  "runtime_s": 3.936,
+  "run_file": "run_20260307_222721.json",
+  "runtime_s": 3.98,
   "path_length_m": 0.001,
   "number_of_turns": 0,
   "number_of_scan_steps": 0,
@@ -13,7 +13,7 @@
   "replans_count": 0,
   "goto_failed_count": 1,
   "goto_fail_reasons": {
-    "goal_blocked": 1
+    "unknown_path": 1
   },
   "final_goal_error_m": 0.0,
   "state_transitions": 3,

@@ -65,6 +65,7 @@ class PlanExecutor:
             "max_goal_snap_cells": 6,
             "block_unknown": True,
             "local_avoid_mode": "lidar",
+            "path_stride": 2,
         }
         self._home_pose: Optional[Tuple[float, float, float]] = None
         self._nav_replan_attempts: int = 0
@@ -99,6 +100,7 @@ class PlanExecutor:
             "block_unknown": bool(planner_cfg.get("block_unknown", True)),
             "replan_limit": int(planner_cfg.get("replan_limit", 6)),
             "local_avoid_mode": str(planner_cfg.get("local_avoid_mode", "lidar")).strip().lower(),
+            "path_stride": int(planner_cfg.get("path_stride", 2)),
         }
         self._nav_replan_limit = max(1, int(self._planner_cfg.get("replan_limit", 6)))
         self._set_state("PLAN", reason="plan_loaded")
@@ -259,18 +261,33 @@ class PlanExecutor:
             return False
         if occ_grid is not None:
             try:
+                strict_block_unknown = bool(self._planner_cfg.get("block_unknown", True))
                 path_world, meta = plan_world_path(
                     occ_grid=occ_grid,
                     start_xy=(float(state.x), float(state.y)),
                     goal_xy=(tx, ty),
-                    block_unknown=bool(self._planner_cfg.get("block_unknown", True)),
+                    block_unknown=strict_block_unknown,
                     inflate_cells=max(0, int(self._planner_cfg.get("inflate_cells", 2))),
                     goal_clearance_cells=max(0, int(self._planner_cfg.get("goal_clearance_cells", 0))),
                     max_goal_snap_cells=max(1, int(self._planner_cfg.get("max_goal_snap_cells", 6))),
                     return_meta=True,
                 )
+                # Bootstrap fallback: early map can be mostly unknown.
+                if not path_world and str(meta.get("fail_reason", "")).strip() == "unknown_path" and strict_block_unknown:
+                    path_world, meta = plan_world_path(
+                        occ_grid=occ_grid,
+                        start_xy=(float(state.x), float(state.y)),
+                        goal_xy=(tx, ty),
+                        block_unknown=False,
+                        inflate_cells=max(0, int(self._planner_cfg.get("inflate_cells", 2))),
+                        goal_clearance_cells=max(0, int(self._planner_cfg.get("goal_clearance_cells", 0))),
+                        max_goal_snap_cells=max(1, int(self._planner_cfg.get("max_goal_snap_cells", 6))),
+                        return_meta=True,
+                    )
+                    self.log.event(op="path_plan_bootstrap_unknown", mode=mode, tx=tx, ty=ty)
                 if path_world:
-                    self._nav_path = path_world[::4]
+                    stride = max(1, int(self._planner_cfg.get("path_stride", 2)))
+                    self._nav_path = path_world[::stride]
                     if self._nav_path[-1] != path_world[-1]:
                         self._nav_path.append(path_world[-1])
                     snapped_goal = bool(meta.get("snapped_goal", False))
@@ -285,7 +302,7 @@ class PlanExecutor:
                     self.log.event(
                         op="path_planned",
                         mode=mode,
-                        block_unknown=bool(self._planner_cfg.get("block_unknown", True)),
+                        block_unknown=strict_block_unknown,
                         inflate_cells=max(0, int(self._planner_cfg.get("inflate_cells", 2))),
                         goal_clearance_cells=max(0, int(self._planner_cfg.get("goal_clearance_cells", 0))),
                         goal_snapped=snapped_goal,
@@ -293,6 +310,8 @@ class PlanExecutor:
                         goal_used=used_world,
                         nodes=len(path_world),
                         waypoints=len(self._nav_path),
+                        path_stride=stride,
+                        replan_attempt=self._nav_replan_attempts,
                         tx=tx,
                         ty=ty,
                     )
@@ -526,6 +545,8 @@ class PlanExecutor:
             target_y=tgt_y,
             wp_idx=self._nav_wp_idx,
             wp_total=len(self._nav_path),
+            replan_attempt=self._nav_replan_attempts,
+            no_progress_s=self._nav_no_improve_s,
             heading_error_rad=heading_error,
             subtarget_error_m=subtarget_error,
             goal_error_m=goal_error,

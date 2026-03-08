@@ -1,7 +1,7 @@
 # RoboAI Run Summary
 
-- Run file: `run_20260307_221715.json`
-- Runtime: **3.936 s**
+- Run file: `run_20260307_222721.json`
+- Runtime: **3.98 s**
 - Path length: **0.001 m**
 - Number of turns: **0**
 - Number of scan steps: **0**
@@ -13,7 +13,7 @@
 - Collision burst escapes: **0**
 - Replans count: **0**
 - Goto failed count: **1**
-- Goto fail reasons: **{'goal_blocked': 1}**
+- Goto fail reasons: **{'unknown_path': 1}**
 - Final goal error: **0.0 m**
 - State transitions: **3**
 - Time in AVOID: **0.0 s**
