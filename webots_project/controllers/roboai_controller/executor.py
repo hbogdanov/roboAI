@@ -58,6 +58,11 @@ class PlanExecutor:
         self.behavior_state = "IDLE"
         self.last_goal_reached: Optional[Dict[str, Any]] = None
         self._collision_burst = 0.0
+        self._planner_cfg: Dict[str, Any] = {
+            "inflate_cells": 2,
+            "goal_clearance_cells": 0,
+            "block_unknown": True,
+        }
 
     def load(self, plan: List[Dict[str, Any]], constraints: Optional[Dict[str, Any]] = None):
         self.plan = plan or [{"op": "stop"}]
@@ -71,6 +76,12 @@ class PlanExecutor:
         self._frontier_refresh_timer = 0.0
         self.last_goal_reached = None
         self._collision_burst = 0.0
+        planner_cfg = self.constraints.get("planner", {}) if isinstance(self.constraints, dict) else {}
+        self._planner_cfg = {
+            "inflate_cells": int(planner_cfg.get("inflate_cells", 2)),
+            "goal_clearance_cells": int(planner_cfg.get("goal_clearance_cells", 0)),
+            "block_unknown": bool(planner_cfg.get("block_unknown", True)),
+        }
         self._set_state("PLAN", reason="plan_loaded")
         self.log.event(op="plan_loaded", steps=len(self.plan), constraints=self.constraints)
 
@@ -106,23 +117,51 @@ class PlanExecutor:
         tx, ty = target_xy
         if occ_grid is not None:
             try:
-                path_world = plan_world_path(
+                path_world, meta = plan_world_path(
                     occ_grid=occ_grid,
                     start_xy=(float(state.x), float(state.y)),
                     goal_xy=(tx, ty),
+                    block_unknown=bool(self._planner_cfg.get("block_unknown", True)),
+                    inflate_cells=max(0, int(self._planner_cfg.get("inflate_cells", 2))),
+                    goal_clearance_cells=max(0, int(self._planner_cfg.get("goal_clearance_cells", 0))),
+                    return_meta=True,
                 )
                 if path_world:
                     self._nav_path = path_world[::4]
                     if self._nav_path[-1] != path_world[-1]:
                         self._nav_path.append(path_world[-1])
+                    snapped_goal = bool(meta.get("snapped_goal", False))
+                    gx_raw, gy_raw = meta.get("goal_grid_raw", (None, None))
+                    gx_used, gy_used = meta.get("goal_grid_used", (None, None))
+                    raw_world = None
+                    used_world = None
+                    if gx_raw is not None and gy_raw is not None:
+                        raw_world = occ_grid.grid_to_world(int(gx_raw), int(gy_raw))
+                    if gx_used is not None and gy_used is not None:
+                        used_world = occ_grid.grid_to_world(int(gx_used), int(gy_used))
                     self.log.event(
                         op="path_planned",
                         mode=mode,
+                        block_unknown=bool(self._planner_cfg.get("block_unknown", True)),
+                        inflate_cells=max(0, int(self._planner_cfg.get("inflate_cells", 2))),
+                        goal_clearance_cells=max(0, int(self._planner_cfg.get("goal_clearance_cells", 0))),
+                        goal_snapped=snapped_goal,
+                        goal_raw=raw_world,
+                        goal_used=used_world,
                         nodes=len(path_world),
                         waypoints=len(self._nav_path),
                         tx=tx,
                         ty=ty,
                     )
+                    if snapped_goal:
+                        self.log.event(
+                            op="goal_snapped",
+                            mode=mode,
+                            goal_raw=raw_world,
+                            goal_used=used_world,
+                            tx=tx,
+                            ty=ty,
+                        )
             except Exception:
                 self.log.event(op="path_plan_failed", mode=mode, tx=tx, ty=ty)
 

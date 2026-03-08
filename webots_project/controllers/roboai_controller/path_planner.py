@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict, Optional, Any
 import heapq
 import math
 
@@ -29,17 +29,43 @@ def _is_inside(gx: int, gy: int, w: int, h: int) -> bool:
     return 0 <= gx < w and 0 <= gy < h
 
 
-def _make_occupancy_mask(prob_grid, occ_thresh: float = 0.65, inflate_cells: int = 2):
-    occ = prob_grid >= occ_thresh
-    if inflate_cells <= 0:
-        return occ
+def _make_occupancy_mask(
+    prob_grid,
+    occ_thresh: float = 0.65,
+    free_thresh: float = 0.45,
+    unknown_band: float = 0.06,
+    block_unknown: bool = True,
+    inflate_cells: int = 2,
+):
+    """
+    Build a non-traversable mask from occupancy probabilities.
 
-    # Very small binary dilation without SciPy dependency.
-    h, w = occ.shape
-    out = occ.copy()
+    Conservative default:
+      - free if p <= free_thresh
+      - occupied if p >= occ_thresh
+      - unknown near 0.5 is blocked when block_unknown=True
+      - mid-confidence cells are also treated as blocked
+    """
+    occupied = prob_grid >= occ_thresh
+    unknown = abs(prob_grid - 0.5) <= unknown_band
+    free = prob_grid <= free_thresh
+
+    traversable = free.copy()
+    if block_unknown:
+        traversable &= ~unknown
+
+    # Non-traversable includes occupied/unknown/mid-confidence cells.
+    occ_mask = ~traversable
+
+    if inflate_cells <= 0:
+        return occ_mask
+
+    # Inflate only hard occupied cells for safety margin.
+    h, w = occupied.shape
+    out = occ_mask.copy()
     for gy in range(h):
         for gx in range(w):
-            if not occ[gy, gx]:
+            if not occupied[gy, gx]:
                 continue
             for dy in range(-inflate_cells, inflate_cells + 1):
                 for dx in range(-inflate_cells, inflate_cells + 1):
@@ -122,19 +148,64 @@ def astar_grid(start: GridPt, goal: GridPt, occ_mask) -> List[GridPt]:
     return path
 
 
-def plan_world_path(occ_grid, start_xy: Tuple[float, float], goal_xy: Tuple[float, float]) -> List[Tuple[float, float]]:
+def plan_world_path(
+    occ_grid,
+    start_xy: Tuple[float, float],
+    goal_xy: Tuple[float, float],
+    block_unknown: bool = True,
+    inflate_cells: int = 2,
+    goal_clearance_cells: int = 0,
+    return_meta: bool = False,
+) -> Any:
     """
     Compute an A* path in occupancy grid and return world-space waypoints.
     Returns [] when planning fails.
+    When return_meta=True, returns (path_world, meta_dict).
     """
     sx, sy = occ_grid.world_to_grid(start_xy[0], start_xy[1])
     gx, gy = occ_grid.world_to_grid(goal_xy[0], goal_xy[1])
 
     prob = occ_grid.prob()
-    occ_mask = _make_occupancy_mask(prob_grid=prob, occ_thresh=0.65, inflate_cells=2)
+    occ_mask = _make_occupancy_mask(
+        prob_grid=prob,
+        occ_thresh=0.65,
+        free_thresh=0.45,
+        unknown_band=0.06,
+        block_unknown=block_unknown,
+        inflate_cells=inflate_cells,
+    )
     s_free = _nearest_free((sx, sy), occ_mask)
-    g_free = _nearest_free((gx, gy), occ_mask)
+
+    # For goal safety, optionally require extra clearance from occupied cells.
+    if goal_clearance_cells > 0:
+        goal_mask = _make_occupancy_mask(
+            prob_grid=prob,
+            occ_thresh=0.65,
+            free_thresh=0.45,
+            unknown_band=0.06,
+            block_unknown=block_unknown,
+            inflate_cells=inflate_cells + goal_clearance_cells,
+        )
+        g_free = _nearest_free((gx, gy), goal_mask)
+    else:
+        g_free = _nearest_free((gx, gy), occ_mask)
+
+    snapped = (g_free != (gx, gy))
     path_grid = astar_grid(s_free, g_free, occ_mask)
     if not path_grid:
+        if return_meta:
+            return [], {
+                "snapped_goal": snapped,
+                "goal_grid_raw": (gx, gy),
+                "goal_grid_used": g_free,
+            }
         return []
-    return [occ_grid.grid_to_world(px, py) for (px, py) in path_grid]
+
+    path_world = [occ_grid.grid_to_world(px, py) for (px, py) in path_grid]
+    if return_meta:
+        return path_world, {
+            "snapped_goal": snapped,
+            "goal_grid_raw": (gx, gy),
+            "goal_grid_used": g_free,
+        }
+    return path_world

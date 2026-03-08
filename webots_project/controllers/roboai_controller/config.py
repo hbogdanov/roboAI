@@ -41,3 +41,6 @@ LOG_DIR = os.path.join(REPO_ROOT, "data", "logs")
 REPORTS_DIR = os.path.join(REPO_ROOT, "reports")
 DEFAULT_COMMAND_FILE = os.path.join(REPO_ROOT, "demo", "mvp_command.txt")
 DEFAULT_MODE_FILE = os.path.join(REPO_ROOT, "demo", "mvp_mode.txt")
+DEFAULT_WORLD_FILE = os.path.join(REPO_ROOT, "demo", "mvp_world.txt")
+DEFAULT_WORLD_NAME = "world_office"
+GOALS_DIR = os.path.join(REPO_ROOT, "webots_project", "config", "goals")

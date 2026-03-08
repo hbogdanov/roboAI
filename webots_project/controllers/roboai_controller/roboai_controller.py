@@ -21,7 +21,7 @@ from state import StateEstimator
 from planner_text import get_plan
 from waypoint_planner import get_waypoint_plan
 from executor import PlanExecutor
-from waypoint_planner import GOAL_LIBRARY
+from waypoint_planner import get_goal_xy, get_goals_source, resolve_world_name
 from sensors import LidarWrapper
 from occupancy_grid import OccupancyGrid
 from pose_fusion import PoseFusion
@@ -76,6 +76,18 @@ def infer_plan_mode(command: str) -> str:
     if any(k in t for k in waypoint_hints):
         return "waypoint"
     return "primitive"
+
+
+def planner_settings_for_world(world_name: str) -> dict:
+    wn = (world_name or "").strip().lower()
+    # Office is cluttered: wider safety margin and goal clearance.
+    if wn == "world_office":
+        return {"block_unknown": True, "inflate_cells": 5, "goal_clearance_cells": 2}
+    if wn == "world_obstacles":
+        return {"block_unknown": True, "inflate_cells": 4, "goal_clearance_cells": 1}
+    if wn == "world_empty":
+        return {"block_unknown": True, "inflate_cells": 2, "goal_clearance_cells": 0}
+    return {"block_unknown": True, "inflate_cells": 3, "goal_clearance_cells": 1}
 
 
 def resolve_plan_mode(command: str) -> str:
@@ -249,6 +261,8 @@ def main():
     print("Command:", command)
     plan_mode = resolve_plan_mode(command)
     print("Plan mode:", plan_mode)
+    world_name = resolve_world_name()
+    print("World name:", world_name)
 
     robot = Robot()
     log = RunLogger()
@@ -263,15 +277,33 @@ def main():
     occ_grid = OccupancyGrid(width_m=20.0, height_m=20.0, resolution=0.05)
 
     # High-level plan
-    constraints = {"speed_limit": 0.5, "avoid": []}
+    constraints = {"speed_limit": 0.5, "avoid": [], "planner": planner_settings_for_world(world_name)}
     if plan_mode == "waypoint":
         wp = get_waypoint_plan(command)
         plan = wp.get("steps", [{"op": "stop"}]) if isinstance(wp, dict) else [{"op": "stop"}]
         constraints = wp.get("constraints", constraints) if isinstance(wp, dict) else constraints
+        if not isinstance(constraints, dict):
+            constraints = {"speed_limit": 0.5, "avoid": []}
+        if "planner" not in constraints or not isinstance(constraints.get("planner"), dict):
+            constraints["planner"] = planner_settings_for_world(world_name)
+        else:
+            merged = planner_settings_for_world(world_name)
+            merged.update(constraints.get("planner", {}))
+            constraints["planner"] = merged
+        goals_source = get_goals_source()
     else:
         plan = get_plan(command)
+        goals_source = ""
     print("Plan:", plan)
-    log.event(op="plan_built", command=command, plan_mode=plan_mode, plan=plan, constraints=constraints)
+    log.event(
+        op="plan_built",
+        command=command,
+        plan_mode=plan_mode,
+        world_name=world_name,
+        goals_source=goals_source,
+        plan=plan,
+        constraints=constraints,
+    )
 
     execu = PlanExecutor(robot, drive, sensors, log)
     execu.load(plan, constraints=constraints)
@@ -307,7 +339,7 @@ def main():
         reached = execu.last_goal_reached
         if reached is not None:
             goal_name = reached.get("goal")
-            landmark_xy = GOAL_LIBRARY.get(goal_name) if isinstance(goal_name, str) else None
+            landmark_xy = get_goal_xy(goal_name) if isinstance(goal_name, str) else None
             corr = fusion.maybe_correct_with_landmark(state=state, landmark_xy=landmark_xy)
             log.event(op="pose_correction", goal=goal_name, **corr)
             execu.last_goal_reached = None

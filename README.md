@@ -64,6 +64,18 @@ Plan mode source precedence:
 3. `--mode-file <path>` (default: `demo/mvp_mode.txt`)
 4. Auto-infer from command text (`go to`/`face`/`explore` -> waypoint)
 
+World source precedence (for waypoint goal library selection):
+1. `--world-name`
+2. `ROBOAI_WORLD_NAME`
+3. `--world-file <path>` (default: `demo/mvp_world.txt`)
+4. `DEFAULT_WORLD_NAME` in config
+
+Goal library source precedence:
+1. `--goals-file`
+2. `ROBOAI_GOALS_FILE`
+3. world-mapped file in `webots_project/config/goals/`
+4. planner fallback defaults
+
 ## Task Abstraction (Primitive Mode)
 
 High-level phrases compile to primitive plans:
@@ -108,6 +120,19 @@ Available worlds:
 - `webots_project/worlds/world_empty.wbt`
 - `webots_project/worlds/world_obstacles.wbt`
 - `webots_project/worlds/world_office.wbt`
+
+World-specific goal files:
+- `webots_project/config/goals/goals_world_empty.json`
+- `webots_project/config/goals/goals_world_obstacles.json`
+- `webots_project/config/goals/goals_world_office.json`
+
+World-specific planning safety defaults:
+- `world_office`: `inflate_cells=5`, `goal_clearance_cells=2`
+- `world_obstacles`: `inflate_cells=4`, `goal_clearance_cells=1`
+- `world_empty`: `inflate_cells=2`, `goal_clearance_cells=0`
+
+Goal snapping policy:
+- If a requested `goto` goal is too close to occupied space, the planner snaps it to the nearest safe reachable grid cell (with configured clearance) and logs `goal_snapped`.
 
 Randomized world variants:
 ```bash

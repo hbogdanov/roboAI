@@ -49,3 +49,33 @@ def test_plan_world_path_empty_map():
     path = plan_world_path(g, start_xy=(1.0, 1.0), goal_xy=(8.0, 8.0))
     assert len(path) >= 2
     assert path[-1] == (8.0, 8.0)
+
+
+def test_plan_blocks_unknown_band_by_default():
+    # Unknown barrier (0.5) across map should block traversal.
+    prob = np.full((10, 10), 0.2, dtype=np.float32)
+    prob[5, :] = 0.5
+    g = DummyGrid(prob)
+    path = plan_world_path(g, start_xy=(1.0, 1.0), goal_xy=(8.0, 8.0))
+    assert path == []
+
+
+def test_plan_snaps_goal_away_from_occupied_with_clearance():
+    prob = np.full((10, 10), 0.2, dtype=np.float32)  # mostly free
+    # Make target cell occupied; planner should snap to a nearby safe cell.
+    prob[8, 8] = 0.95
+    g = DummyGrid(prob)
+
+    path, meta = plan_world_path(
+        g,
+        start_xy=(1.0, 1.0),
+        goal_xy=(8.0, 8.0),
+        block_unknown=True,
+        inflate_cells=1,
+        goal_clearance_cells=1,
+        return_meta=True,
+    )
+    assert len(path) >= 2
+    assert meta["snapped_goal"] is True
+    assert meta["goal_grid_raw"] == (8, 8)
+    assert meta["goal_grid_used"] != (8, 8)
