@@ -65,7 +65,7 @@ class PlanExecutor:
             "max_goal_snap_cells": 6,
             "block_unknown": True,
             "local_avoid_mode": "lidar",
-            "path_stride": 2,
+            "path_stride": 1,
         }
         self._home_pose: Optional[Tuple[float, float, float]] = None
         self._nav_replan_attempts: int = 0
@@ -73,6 +73,7 @@ class PlanExecutor:
         self._nav_no_progress_events: int = 0
         self._nav_collision_burst_events: int = 0
         self._last_nav_fail_reason: Optional[str] = None
+        self._local_avoid_mode_runtime: str = "lidar"
 
     def load(self, plan: List[Dict[str, Any]], constraints: Optional[Dict[str, Any]] = None):
         self.plan = plan or [{"op": "stop"}]
@@ -92,6 +93,7 @@ class PlanExecutor:
         self._nav_no_progress_events = 0
         self._nav_collision_burst_events = 0
         self._last_nav_fail_reason = None
+        self._local_avoid_mode_runtime = "lidar"
         planner_cfg = self.constraints.get("planner", {}) if isinstance(self.constraints, dict) else {}
         self._planner_cfg = {
             "inflate_cells": int(planner_cfg.get("inflate_cells", 2)),
@@ -100,8 +102,10 @@ class PlanExecutor:
             "block_unknown": bool(planner_cfg.get("block_unknown", True)),
             "replan_limit": int(planner_cfg.get("replan_limit", 6)),
             "local_avoid_mode": str(planner_cfg.get("local_avoid_mode", "lidar")).strip().lower(),
-            "path_stride": int(planner_cfg.get("path_stride", 2)),
+            "path_stride": int(planner_cfg.get("path_stride", 1)),
         }
+        mode = str(self._planner_cfg.get("local_avoid_mode", "lidar")).strip().lower()
+        self._local_avoid_mode_runtime = mode if mode in {"lidar", "ir"} else "lidar"
         self._nav_replan_limit = max(1, int(self._planner_cfg.get("replan_limit", 6)))
         self._set_state("PLAN", reason="plan_loaded")
         self.log.event(op="plan_loaded", steps=len(self.plan), constraints=self.constraints)
@@ -178,6 +182,7 @@ class PlanExecutor:
         self,
         lidar_scan: Optional[Tuple[List[float], float, float, float]],
         base: float,
+        heading_error: float = 0.0,
     ) -> Optional[Tuple[float, float, Dict[str, Any]]]:
         if lidar_scan is None:
             return None
@@ -189,13 +194,21 @@ class PlanExecutor:
         left_front_min = self._lidar_sector_min(ranges, angle_min, angle_inc, 35.0, 25.0, range_max)
         right_front_min = self._lidar_sector_min(ranges, angle_min, angle_inc, -35.0, 25.0, range_max)
 
-        front_stop_m = 0.14
+        front_stop_m = 0.10
         side_bias_m = 0.12
 
         # Hard stop/rotate when front sector is blocked.
         if front_min < front_stop_m:
             turn_v = max(0.8, min(1.8, base * 1.3))
-            if left_front_min <= right_front_min:
+            if abs(heading_error) > 0.20:
+                # Prefer turning toward goal heading when possible.
+                if heading_error > 0.0:
+                    l, r = -turn_v, turn_v
+                    decision = "front_blocked_turn_to_goal_left"
+                else:
+                    l, r = turn_v, -turn_v
+                    decision = "front_blocked_turn_to_goal_right"
+            elif left_front_min <= right_front_min:
                 # Obstacle stronger on left-front, rotate right.
                 l, r = turn_v, -turn_v
                 decision = "front_blocked_turn_right"
@@ -240,6 +253,7 @@ class PlanExecutor:
     def _start_nav_if_needed(self, target_xy: Tuple[float, float], state, occ_grid, mode: str):
         if self._nav_target == target_xy and self._nav_mode == mode:
             return True
+        self._last_nav_fail_reason = None
         self._nav_target = target_xy
         self._nav_mode = mode
         self._nav_path = []
@@ -286,7 +300,7 @@ class PlanExecutor:
                     )
                     self.log.event(op="path_plan_bootstrap_unknown", mode=mode, tx=tx, ty=ty)
                 if path_world:
-                    stride = max(1, int(self._planner_cfg.get("path_stride", 2)))
+                    stride = max(1, int(self._planner_cfg.get("path_stride", 1)))
                     self._nav_path = path_world[::stride]
                     if self._nav_path[-1] != path_world[-1]:
                         self._nav_path.append(path_world[-1])
@@ -335,6 +349,29 @@ class PlanExecutor:
                     )
                 else:
                     fail_reason = str(meta.get("fail_reason", "")).strip() or "unknown_path"
+                    if fail_reason == "unknown_path":
+                        # Keep going with direct local targeting when global path is temporarily unavailable.
+                        self.log.event(
+                            op="path_plan_unavailable",
+                            mode=mode,
+                            tx=tx,
+                            ty=ty,
+                            fail_reason=fail_reason,
+                            attempt=self._nav_replan_attempts,
+                        )
+                        self.log.event(
+                            op="goal_clearance_checked",
+                            mode=mode,
+                            tx=tx,
+                            ty=ty,
+                            goal_snapped=bool(meta.get("snapped_goal", False)),
+                            goal_raw=meta.get("goal_grid_raw"),
+                            goal_used=meta.get("goal_grid_used"),
+                            fail_reason=fail_reason,
+                        )
+                        self.log.event(op="goto_start", mode=mode, tx=tx, ty=ty)
+                        self._set_state("NAVIGATE", reason=f"{mode}_start_no_global_path")
+                        return True
                     self._record_nav_failure(
                         mode=mode,
                         reason=fail_reason,
@@ -357,10 +394,17 @@ class PlanExecutor:
                     return False
             except Exception:
                 self.log.event(op="path_plan_failed", mode=mode, tx=tx, ty=ty, fail_reason="unknown_path")
-                self._record_nav_failure(mode=mode, reason="unknown_path", tx=tx, ty=ty, extra={"attempt": self._nav_replan_attempts})
-                self._nav_target = None
-                self._recovery_s = 0.4
-                return False
+                self.log.event(
+                    op="path_plan_unavailable",
+                    mode=mode,
+                    tx=tx,
+                    ty=ty,
+                    fail_reason="unknown_path",
+                    attempt=self._nav_replan_attempts,
+                )
+                self.log.event(op="goto_start", mode=mode, tx=tx, ty=ty)
+                self._set_state("NAVIGATE", reason=f"{mode}_start_plan_exception")
+                return True
 
         self.log.event(op="goto_start", mode=mode, tx=tx, ty=ty)
         self._set_state("NAVIGATE", reason=f"{mode}_start")
@@ -405,16 +449,18 @@ class PlanExecutor:
         dx_goal = tx - float(state.x)
         dy_goal = ty - float(state.y)
         goal_error = math.hypot(dx_goal, dy_goal)
+        desired_goal = math.atan2(dy_goal, dx_goal)
+        heading_error = self._wrap_pi(desired_goal - float(state.theta))
 
         # If we are in recovery mode, back up briefly and then force a replan.
         if self._recovery_s > 0.0:
             self._recovery_s = max(0.0, self._recovery_s - max(0.0, dt))
             self._set_state("AVOID", reason=f"{mode}_recovery")
-            self.drive.set_velocity(-1.2, -1.2)
-            self.last_cmd = (-1.2, -1.2)
+            # Rotate-in-place recovery avoids drifting farther from goal.
+            rec_turn = 1.0 if heading_error >= 0.0 else -1.0
+            self.drive.set_velocity(-rec_turn, rec_turn)
+            self.last_cmd = (-rec_turn, rec_turn)
             self.log.event(op="goto_recovery_tick", mode=mode, goal_error_m=goal_error, recovery_left_s=self._recovery_s)
-            if self._recovery_s <= 0.0:
-                self._nav_target = None  # trigger path recompute on next tick
             return False
 
         dx = tgt_x - float(state.x)
@@ -439,9 +485,11 @@ class PlanExecutor:
         base = base_nom * goal_scale
         k_heading = 1.8
 
-        local_avoid_mode = str(self._planner_cfg.get("local_avoid_mode", "lidar")).strip().lower()
+        local_avoid_mode = self._local_avoid_mode_runtime
         use_lidar_avoid = local_avoid_mode != "ir"
-        lidar_avoid = self._lidar_local_avoidance(lidar_scan=lidar_scan, base=base) if use_lidar_avoid else None
+        lidar_avoid = self._lidar_local_avoidance(
+            lidar_scan=lidar_scan, base=base, heading_error=heading_error
+        ) if use_lidar_avoid else None
         if lidar_avoid is not None:
             l, r, lidar_meta = lidar_avoid
             self._collision_burst += 1.0
@@ -450,7 +498,12 @@ class PlanExecutor:
             if self._collision_burst >= 8.0:
                 self.log.event(op="collision_burst_escape", mode=mode, burst=self._collision_burst, goal_error_m=goal_error)
                 self._nav_collision_burst_events += 1
-                if self._nav_collision_burst_events >= 3:
+                # If lidar keeps causing burst escapes, degrade to IR mode instead of aborting.
+                if local_avoid_mode == "lidar" and self._nav_collision_burst_events >= 2:
+                    self._local_avoid_mode_runtime = "ir"
+                    self._nav_collision_burst_events = 0
+                    self.log.event(op="local_avoid_fallback", mode=mode, new_mode="ir", reason="lidar_collision_burst")
+                elif self._nav_collision_burst_events >= 3:
                     self._record_nav_failure(
                         mode=mode,
                         reason="collision_burst",
@@ -463,7 +516,6 @@ class PlanExecutor:
                     return False
                 self._collision_burst = 0.0
                 self._recovery_s = 0.8
-                self._nav_target = None
                 return False
         else:
             l_avoid, r_avoid, front = steer(ir, base_speed=base)
@@ -476,7 +528,11 @@ class PlanExecutor:
                 if self._collision_burst >= 6.0:
                     self.log.event(op="collision_burst_escape", mode=mode, burst=self._collision_burst, goal_error_m=goal_error)
                     self._nav_collision_burst_events += 1
-                    if self._nav_collision_burst_events >= 3:
+                    if local_avoid_mode == "lidar" and self._nav_collision_burst_events >= 2:
+                        self._local_avoid_mode_runtime = "ir"
+                        self._nav_collision_burst_events = 0
+                        self.log.event(op="local_avoid_fallback", mode=mode, new_mode="ir", reason="lidar_collision_burst")
+                    elif self._nav_collision_burst_events >= 3:
                         self._record_nav_failure(
                             mode=mode,
                             reason="collision_burst",
@@ -489,7 +545,6 @@ class PlanExecutor:
                         return False
                     self._collision_burst = 0.0
                     self._recovery_s = 0.8
-                    self._nav_target = None
                     return False
             elif abs(heading_error) > 0.28:
                 self._collision_burst = max(0.0, self._collision_burst - 0.5)
@@ -532,7 +587,6 @@ class PlanExecutor:
                 return False
             self._nav_no_improve_s = 0.0
             self._recovery_s = 0.6
-            self._nav_target = None  # force replan after recovery
 
         self.log.event(
             op="goto_progress",

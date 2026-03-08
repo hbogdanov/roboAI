@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -83,33 +84,33 @@ def planner_settings_for_world(world_name: str) -> dict:
     # Office is cluttered: wider safety margin and goal clearance.
     if wn == "world_office":
         cfg = {
-            "block_unknown": True,
-            "inflate_cells": 2,
+            "block_unknown": False,
+            "inflate_cells": 1,
             "goal_clearance_cells": 0,
             "max_goal_snap_cells": 12,
-            "local_avoid_mode": "lidar",
+            "local_avoid_mode": "ir",
             "replan_limit": 6,
-            "path_stride": 2,
+            "path_stride": 1,
         }
     elif wn == "world_obstacles":
         cfg = {
-            "block_unknown": True,
-            "inflate_cells": 4,
-            "goal_clearance_cells": 1,
-            "max_goal_snap_cells": 8,
-            "local_avoid_mode": "lidar",
-            "replan_limit": 6,
-            "path_stride": 3,
-        }
-    elif wn == "world_empty":
-        cfg = {
-            "block_unknown": True,
-            "inflate_cells": 2,
+            "block_unknown": False,
+            "inflate_cells": 1,
             "goal_clearance_cells": 0,
             "max_goal_snap_cells": 12,
             "local_avoid_mode": "lidar",
             "replan_limit": 6,
-            "path_stride": 4,
+            "path_stride": 1,
+        }
+    elif wn == "world_empty":
+        cfg = {
+            "block_unknown": False,
+            "inflate_cells": 1,
+            "goal_clearance_cells": 0,
+            "max_goal_snap_cells": 12,
+            "local_avoid_mode": "lidar",
+            "replan_limit": 6,
+            "path_stride": 1,
         }
     else:
         cfg = {
@@ -119,7 +120,7 @@ def planner_settings_for_world(world_name: str) -> dict:
             "max_goal_snap_cells": 8,
             "local_avoid_mode": "lidar",
             "replan_limit": 6,
-            "path_stride": 3,
+            "path_stride": 1,
         }
 
     env_inflate = os.getenv("ROBOAI_INFLATE_CELLS", "").strip()
@@ -339,6 +340,17 @@ def main():
     drive = Drive(robot, LEFT_MOTOR_NAME, RIGHT_MOTOR_NAME)
     est = StateEstimator()
     fusion = PoseFusion()
+
+    # Initialize estimator to the robot's true spawn pose in world frame.
+    try:
+        node = robot.getSelf()
+        pos = node.getPosition()
+        rot = node.getOrientation()  # 3x3 row-major matrix
+        theta0 = math.atan2(rot[3], rot[0])
+        est.reset_pose(x=float(pos[0]), y=float(pos[1]), theta=float(theta0))
+        log.event(op="pose_seeded", x=float(pos[0]), y=float(pos[1]), theta=float(theta0))
+    except Exception:
+        log.event(op="pose_seed_failed")
 
     lidar = LidarWrapper(robot, name="LDS-01", timestep=TIME_STEP_MS)
     camera = CameraWrapper(robot, name="camera", timestep=TIME_STEP_MS)

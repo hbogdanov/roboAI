@@ -10,13 +10,13 @@
       "avg_path_efficiency": 1.772
     },
     "world_office": {
-      "trials": 7,
-      "success_rate": 71.4,
-      "avg_final_goal_error_m": 0.109,
+      "trials": 13,
+      "success_rate": 53.8,
+      "avg_final_goal_error_m": 0.235,
       "avg_replans": 0,
-      "avg_runtime_s": 9.107,
-      "avg_collision_count": 0.857,
-      "avg_path_efficiency": 256.806
+      "avg_runtime_s": 8.722,
+      "avg_collision_count": 0.769,
+      "avg_path_efficiency": 249.248
     },
     "world_empty": {
       "trials": 0,
@@ -247,6 +247,66 @@
       "runtime_s": 3.9362552165985107,
       "collision_count": 0,
       "path_efficiency": 590.4279556202968
+    },
+    {
+      "run": "run_20260307_222721.json",
+      "world": "world_office",
+      "success": true,
+      "final_goal_error_m": 0.0,
+      "replans": 0,
+      "runtime_s": 3.9796814918518066,
+      "collision_count": 0,
+      "path_efficiency": 590.4279556202968
+    },
+    {
+      "run": "run_20260307_222922.json",
+      "world": "world_office",
+      "success": true,
+      "final_goal_error_m": 0.0,
+      "replans": 0,
+      "runtime_s": 3.8295462131500244,
+      "collision_count": 0,
+      "path_efficiency": 590.4279556202968
+    },
+    {
+      "run": "run_20260307_224018.json",
+      "world": "world_office",
+      "success": false,
+      "final_goal_error_m": 0.5985862777581437,
+      "replans": 0,
+      "runtime_s": 4.7912726402282715,
+      "collision_count": 0,
+      "path_efficiency": 233.1572319372507
+    },
+    {
+      "run": "run_20260307_224251.json",
+      "world": "world_office",
+      "success": false,
+      "final_goal_error_m": 0.6061020664273106,
+      "replans": 0,
+      "runtime_s": 10.958369255065918,
+      "collision_count": 1,
+      "path_efficiency": 7.533351597327666
+    },
+    {
+      "run": "run_20260307_224903.json",
+      "world": "world_office",
+      "success": false,
+      "final_goal_error_m": 0.5612769472031647,
+      "replans": 0,
+      "runtime_s": 13.741739749908447,
+      "collision_count": 3,
+      "path_efficiency": 13.135618700691719
+    },
+    {
+      "run": "run_20260307_225146.json",
+      "world": "world_office",
+      "success": false,
+      "final_goal_error_m": 0.5353521405623599,
+      "replans": 0,
+      "runtime_s": 12.330755472183228,
+      "collision_count": 0,
+      "path_efficiency": 7.903634980925109
     }
   ]
 }

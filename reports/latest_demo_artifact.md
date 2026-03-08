@@ -1,16 +1,16 @@
 # RoboAI MVP Demo Artifact
 
-- Timestamp: `2026-03-07 22:29:26`
+- Timestamp: `2026-03-07 22:51:59`
 - Command: `go to station A and face 90 degrees`
-- Log file: `C:\Users\Ivan\roboAI\data\logs\run_20260307_222922.json`
+- Log file: `C:\Users\Ivan\roboAI\data\logs\run_20260307_225146.json`
 
 ## Resolved Plan
 ```json
 [
   {
     "op": "goto",
-    "x": 0.35,
-    "y": 0.45,
+    "x": 0.3,
+    "y": 0.52,
     "goal": "station_a",
     "accept_radius": 0.14
   },
