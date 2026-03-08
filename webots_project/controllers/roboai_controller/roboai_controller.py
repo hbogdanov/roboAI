@@ -28,7 +28,7 @@ from occupancy_grid import OccupancyGrid
 from pose_fusion import PoseFusion
 from perception import detect_color_marker_bgra
 
-RUN_SECONDS = 40.0
+RUN_SECONDS = float(os.getenv("ROBOAI_RUN_SECONDS", "90"))
 DEFAULT_COMMAND = "Go forward for 3 seconds, turn left 90, scan, then stop."
 
 
@@ -88,8 +88,8 @@ def planner_settings_for_world(world_name: str) -> dict:
             "inflate_cells": 1,
             "goal_clearance_cells": 0,
             "max_goal_snap_cells": 12,
-            "local_avoid_mode": "ir",
-            "replan_limit": 6,
+            "local_avoid_mode": "lidar",
+            "replan_limit": 20,
             "path_stride": 1,
         }
     elif wn == "world_obstacles":

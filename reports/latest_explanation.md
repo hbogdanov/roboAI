@@ -27,22 +27,22 @@
 ## Execution Evidence
 - `plan_built`: `1`
 - `plan_loaded`: `1`
-- `state_transition`: `7`
-- `spa_tick`: `163`
+- `state_transition`: `45`
+- `spa_tick`: `1225`
 - `turn_done`: `0`
 - `scan`: `0`
 - `goto_done`: `0`
 - `goto_failed`: `1`
 - `goto_abort`: `1`
-- `goto_start`: `1`
-- `goto_progress`: `140`
-- `goto_stuck`: `3`
-- `goto_recovery_tick`: `20`
-- `path_planned`: `1`
+- `goto_start`: `10`
+- `goto_progress`: `1093`
+- `goto_stuck`: `6`
+- `goto_recovery_tick`: `102`
+- `path_planned`: `8`
 - `path_plan_failed`: `0`
-- `goal_snapped`: `1`
-- `goal_clearance_checked`: `1`
-- `lidar_avoid`: `0`
+- `goal_snapped`: `2`
+- `goal_clearance_checked`: `10`
+- `lidar_avoid`: `23`
 - `frontier_detected`: `0`
 - `frontier_selected`: `0`
 - `frontier_reached`: `0`
@@ -50,9 +50,9 @@
 - `explore_done`: `0`
 - `face_done`: `1`
 - `pose_correction`: `0`
-- `camera_marker`: `17`
-- `collision_warning`: `0`
-- `collision_burst_escape`: `0`
+- `camera_marker`: `123`
+- `collision_warning`: `26`
+- `collision_burst_escape`: `4`
 - `stop`: `2`
 
 ## Summary

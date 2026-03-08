@@ -4,18 +4,18 @@
 RoboAI is a Webots-based mobile robot system that converts natural-language commands into executable motion plans, performs obstacle-aware navigation with onboard sensors, and logs trajectories / sensor data for analysis.
 
 ## KPI Summary
-- Runs evaluated: **27**
-- Command success rate: **37.0%**
-- Path completion (avg): **75.0%**
-- Obstacle avoidance success: **66.7%**
+- Runs evaluated: **33**
+- Command success rate: **30.3%**
+- Path completion (avg): **72.5%**
+- Obstacle avoidance success: **54.5%**
 - Planning parse success: **100.0%**
-- Map generation output: **85.2%**
-- Goto success (`goto_done/goto_start`): **78.4%**
-- Collision warnings (total): **31**
-- Goto stuck events (total): **41**
-- Collision burst escapes (total): **10**
-- Goto failed (total): **13**
-- Time in AVOID (total): **41.727 s**
+- Map generation output: **87.9%**
+- Goto success (`goto_done/goto_start`): **71.6%**
+- Collision warnings (total): **119**
+- Goto stuck events (total): **62**
+- Collision burst escapes (total): **26**
+- Goto failed (total): **18**
+- Time in AVOID (total): **81.634 s**
 - Replans per goal (avg): **0.0**
 
 ## Metric Definitions
@@ -58,3 +58,9 @@ RoboAI is a Webots-based mobile robot system that converts natural-language comm
 | `run_20260307_224251.json` | No | 66.7% | 0.0% | 1 | 0 | 2 | 1 | 3.316 | 0.0 | Yes | Yes | 0.08 |
 | `run_20260307_224903.json` | No | 66.7% | 0.0% | 1 | 0 | 2 | 3 | 4.723 | 0.0 | Yes | Yes | 0.046 |
 | `run_20260307_225146.json` | No | 66.7% | 0.0% | 1 | 0 | 3 | 0 | 1.347 | 0.0 | Yes | Yes | 0.076 |
+| `run_20260307_230033.json` | No | 66.7% | 0.0% | 1 | 0 | 3 | 1 | 3.203 | 0.0 | Yes | Yes | 0.07 |
+| `run_20260307_230100.json` | No | 66.7% | 0.0% | 1 | 0 | 3 | 1 | 3.14 | 0.0 | Yes | Yes | 0.07 |
+| `run_20260307_230428.json` | No | 33.3% | 0.0% | 0 | 15 | 1 | 2 | 4.996 | 0.0 | Yes | Yes | 0.281 |
+| `run_20260307_230812.json` | No | 66.7% | 0.0% | 1 | 21 | 2 | 4 | 7.911 | 0.0 | Yes | Yes | 0.181 |
+| `run_20260307_231053.json` | No | 66.7% | 0.0% | 1 | 26 | 6 | 4 | 10.323 | 0.0 | Yes | Yes | 0.509 |
+| `run_20260307_231555.json` | No | 66.7% | 0.0% | 1 | 26 | 6 | 4 | 10.334 | 0.0 | Yes | Yes | 0.509 |

@@ -68,6 +68,8 @@ class PlanExecutor:
             "path_stride": 1,
         }
         self._home_pose: Optional[Tuple[float, float, float]] = None
+        self._last_good_nav_path: List[Tuple[float, float]] = []
+        self._last_good_nav_wp_idx: int = 0
         self._nav_replan_attempts: int = 0
         self._nav_replan_limit: int = 6
         self._nav_no_progress_events: int = 0
@@ -88,6 +90,8 @@ class PlanExecutor:
         self.last_goal_reached = None
         self._collision_burst = 0.0
         self._home_pose = None
+        self._last_good_nav_path = []
+        self._last_good_nav_wp_idx = 0
         self._nav_replan_attempts = 0
         self._nav_replan_limit = 6
         self._nav_no_progress_events = 0
@@ -123,6 +127,8 @@ class PlanExecutor:
         self._nav_no_progress_events = 0
         self._nav_collision_burst_events = 0
         self._last_nav_fail_reason = None
+        self._last_good_nav_path = []
+        self._last_good_nav_wp_idx = 0
 
     def _set_state(self, new_state: str, reason: str = ""):
         if self.behavior_state == new_state:
@@ -194,7 +200,7 @@ class PlanExecutor:
         left_front_min = self._lidar_sector_min(ranges, angle_min, angle_inc, 35.0, 25.0, range_max)
         right_front_min = self._lidar_sector_min(ranges, angle_min, angle_inc, -35.0, 25.0, range_max)
 
-        front_stop_m = 0.10
+        front_stop_m = 0.08
         side_bias_m = 0.12
 
         # Hard stop/rotate when front sector is blocked.
@@ -256,6 +262,8 @@ class PlanExecutor:
         self._last_nav_fail_reason = None
         self._nav_target = target_xy
         self._nav_mode = mode
+        prev_path = list(self._nav_path)
+        prev_wp_idx = self._nav_wp_idx
         self._nav_path = []
         self._nav_wp_idx = 0
         self._nav_started = True
@@ -263,16 +271,16 @@ class PlanExecutor:
 
         tx, ty = target_xy
         if self._nav_replan_attempts > self._nav_replan_limit:
-            self._record_nav_failure(
+            self.log.event(
+                op="replan_limit_reached",
                 mode=mode,
-                reason="replan_limit",
                 tx=tx,
                 ty=ty,
-                extra={"attempt": self._nav_replan_attempts, "limit": self._nav_replan_limit},
+                attempt=self._nav_replan_attempts,
+                limit=self._nav_replan_limit,
             )
-            self.drive.stop()
-            self.last_cmd = (0.0, 0.0)
-            return False
+            # Soft-limit behavior: keep navigating instead of hard-aborting.
+            self._nav_replan_attempts = self._nav_replan_limit
         if occ_grid is not None:
             try:
                 strict_block_unknown = bool(self._planner_cfg.get("block_unknown", True))
@@ -285,6 +293,7 @@ class PlanExecutor:
                     goal_clearance_cells=max(0, int(self._planner_cfg.get("goal_clearance_cells", 0))),
                     max_goal_snap_cells=max(1, int(self._planner_cfg.get("max_goal_snap_cells", 6))),
                     return_meta=True,
+                    smooth_path=False,
                 )
                 # Bootstrap fallback: early map can be mostly unknown.
                 if not path_world and str(meta.get("fail_reason", "")).strip() == "unknown_path" and strict_block_unknown:
@@ -297,6 +306,7 @@ class PlanExecutor:
                         goal_clearance_cells=max(0, int(self._planner_cfg.get("goal_clearance_cells", 0))),
                         max_goal_snap_cells=max(1, int(self._planner_cfg.get("max_goal_snap_cells", 6))),
                         return_meta=True,
+                        smooth_path=False,
                     )
                     self.log.event(op="path_plan_bootstrap_unknown", mode=mode, tx=tx, ty=ty)
                 if path_world:
@@ -304,6 +314,8 @@ class PlanExecutor:
                     self._nav_path = path_world[::stride]
                     if self._nav_path[-1] != path_world[-1]:
                         self._nav_path.append(path_world[-1])
+                    self._last_good_nav_path = list(self._nav_path)
+                    self._last_good_nav_wp_idx = self._nav_wp_idx
                     snapped_goal = bool(meta.get("snapped_goal", False))
                     gx_raw, gy_raw = meta.get("goal_grid_raw", (None, None))
                     gx_used, gy_used = meta.get("goal_grid_used", (None, None))
@@ -351,6 +363,12 @@ class PlanExecutor:
                     fail_reason = str(meta.get("fail_reason", "")).strip() or "unknown_path"
                     if fail_reason == "unknown_path":
                         # Keep going with direct local targeting when global path is temporarily unavailable.
+                        if prev_path:
+                            self._nav_path = prev_path
+                            self._nav_wp_idx = min(prev_wp_idx, max(0, len(prev_path) - 1))
+                        elif self._last_good_nav_path:
+                            self._nav_path = list(self._last_good_nav_path)
+                            self._nav_wp_idx = min(self._last_good_nav_wp_idx, max(0, len(self._nav_path) - 1))
                         self.log.event(
                             op="path_plan_unavailable",
                             mode=mode,
@@ -394,6 +412,12 @@ class PlanExecutor:
                     return False
             except Exception:
                 self.log.event(op="path_plan_failed", mode=mode, tx=tx, ty=ty, fail_reason="unknown_path")
+                if prev_path:
+                    self._nav_path = prev_path
+                    self._nav_wp_idx = min(prev_wp_idx, max(0, len(prev_path) - 1))
+                elif self._last_good_nav_path:
+                    self._nav_path = list(self._last_good_nav_path)
+                    self._nav_wp_idx = min(self._last_good_nav_wp_idx, max(0, len(self._nav_path) - 1))
                 self.log.event(
                     op="path_plan_unavailable",
                     mode=mode,
@@ -415,12 +439,32 @@ class PlanExecutor:
         if not self._nav_path:
             return tx, ty
 
+        cur_goal_error = math.hypot(tx - float(state.x), ty - float(state.y))
+
         while self._nav_wp_idx < len(self._nav_path):
             wx, wy = self._nav_path[self._nav_wp_idx]
             if math.hypot(float(state.x) - wx, float(state.y) - wy) <= 0.12:
                 self._nav_wp_idx += 1
             else:
                 break
+
+        # Skip early path points that move away from the final goal.
+        while self._nav_wp_idx < len(self._nav_path):
+            wx, wy = self._nav_path[self._nav_wp_idx]
+            wp_goal_error = math.hypot(tx - wx, ty - wy)
+            if wp_goal_error > (cur_goal_error + 0.08):
+                self._nav_wp_idx += 1
+                continue
+            # If a waypoint requires near about-face and barely helps goal error,
+            # skip it to avoid spin-in-place behavior near obstacles/passages.
+            dx = wx - float(state.x)
+            dy = wy - float(state.y)
+            wp_heading = math.atan2(dy, dx)
+            wp_heading_err = abs(self._wrap_pi(wp_heading - float(state.theta)))
+            if wp_heading_err > 2.2 and wp_goal_error > (cur_goal_error - 0.12):
+                self._nav_wp_idx += 1
+                continue
+            break
 
         if self._nav_wp_idx < len(self._nav_path):
             return self._nav_path[self._nav_wp_idx]
@@ -456,11 +500,21 @@ class PlanExecutor:
         if self._recovery_s > 0.0:
             self._recovery_s = max(0.0, self._recovery_s - max(0.0, dt))
             self._set_state("AVOID", reason=f"{mode}_recovery")
-            # Rotate-in-place recovery avoids drifting farther from goal.
+
             rec_turn = 1.0 if heading_error >= 0.0 else -1.0
             self.drive.set_velocity(-rec_turn, rec_turn)
             self.last_cmd = (-rec_turn, rec_turn)
-            self.log.event(op="goto_recovery_tick", mode=mode, goal_error_m=goal_error, recovery_left_s=self._recovery_s)
+            self.log.event(
+                op="goto_recovery_tick",
+                mode=mode,
+                goal_error_m=goal_error,
+                recovery_left_s=self._recovery_s,
+            )
+            if self._recovery_s <= 0.0:
+                self._nav_started = False
+                self._nav_prev_goal_error = None
+                self._nav_target = None
+                self.log.event(op="goto_force_replan", mode=mode, tx=tx, ty=ty)
             return False
 
         dx = tgt_x - float(state.x)
@@ -565,16 +619,17 @@ class PlanExecutor:
         if self._nav_prev_goal_error is None:
             self._nav_prev_goal_error = goal_error
         improve = self._nav_prev_goal_error - goal_error
-        if improve >= 0.003:
+        # Small per-tick improvement is still progress in tight spaces.
+        if improve >= 0.0003:
             self._nav_no_improve_s = 0.0
         else:
             self._nav_no_improve_s += max(0.0, dt)
         self._nav_prev_goal_error = goal_error
 
-        if self._nav_no_improve_s >= 3.0:
+        if self._nav_no_improve_s >= 6.0:
             self.log.event(op="goto_stuck", mode=mode, goal_error_m=goal_error, no_improve_s=self._nav_no_improve_s, fail_reason="no_progress")
             self._nav_no_progress_events += 1
-            if self._nav_no_progress_events >= 3:
+            if self._nav_no_progress_events >= 6:
                 self._record_nav_failure(
                     mode=mode,
                     reason="no_progress",
