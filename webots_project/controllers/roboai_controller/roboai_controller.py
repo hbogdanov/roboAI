@@ -22,7 +22,7 @@ from state import StateEstimator
 from planner_text import get_plan
 from waypoint_planner import get_waypoint_plan
 from executor import PlanExecutor
-from waypoint_planner import get_goal_xy, get_goals_source, resolve_world_name
+from waypoint_planner import default_speed_limit_for_world, get_goal_xy, get_goals_source, resolve_world_name
 from sensors import LidarWrapper
 from occupancy_grid import OccupancyGrid
 from pose_fusion import PoseFusion
@@ -30,6 +30,11 @@ from perception import detect_color_marker_bgra
 
 RUN_SECONDS = float(os.getenv("ROBOAI_RUN_SECONDS", "90"))
 DEFAULT_COMMAND = "Go forward for 3 seconds, turn left 90, scan, then stop."
+DEFAULT_INITIAL_POSE_BY_WORLD = {
+    "world_office": (-0.45, 0.00, 0.0),
+    "world_obstacles": (-0.45, -0.45, 0.0),
+    "world_empty": (0.0, 0.0, 0.0),
+}
 
 
 def resolve_command() -> str:
@@ -62,6 +67,17 @@ def resolve_command() -> str:
     return DEFAULT_COMMAND
 
 
+def resolve_initial_pose(world_name: str):
+    env_pose = os.getenv("ROBOAI_INITIAL_POSE", "").strip()
+    if env_pose:
+        try:
+            x_s, y_s, th_s = [p.strip() for p in env_pose.split(",")]
+            return float(x_s), float(y_s), float(th_s)
+        except Exception:
+            pass
+    return DEFAULT_INITIAL_POSE_BY_WORLD.get((world_name or "").strip().lower(), (0.0, 0.0, 0.0))
+
+
 def infer_plan_mode(command: str) -> str:
     t = command.lower()
     waypoint_hints = [
@@ -85,9 +101,9 @@ def planner_settings_for_world(world_name: str) -> dict:
     if wn == "world_office":
         cfg = {
             "block_unknown": False,
-            "inflate_cells": 1,
-            "goal_clearance_cells": 0,
-            "max_goal_snap_cells": 12,
+            "inflate_cells": 2,
+            "goal_clearance_cells": 1,
+            "max_goal_snap_cells": 10,
             "local_avoid_mode": "lidar",
             "replan_limit": 20,
             "path_stride": 1,
@@ -151,6 +167,21 @@ def planner_settings_for_world(world_name: str) -> dict:
     if env_avoid in {"lidar", "ir"}:
         cfg["local_avoid_mode"] = env_avoid
     return cfg
+
+
+def resolve_speed_limit(world_name: str, current: float) -> float:
+    env_speed = os.getenv("ROBOAI_SPEED_LIMIT", "").strip()
+    if env_speed:
+        try:
+            return max(0.18, min(0.65, float(env_speed)))
+        except Exception:
+            pass
+
+    try:
+        cur = float(current)
+    except Exception:
+        cur = 0.0
+    return max(cur, default_speed_limit_for_world(world_name))
 
 
 def resolve_plan_mode(command: str) -> str:
@@ -341,38 +372,39 @@ def main():
     est = StateEstimator()
     fusion = PoseFusion()
 
-    # Initialize estimator to the robot's true spawn pose in world frame.
-    try:
-        node = robot.getSelf()
-        pos = node.getPosition()
-        rot = node.getOrientation()  # 3x3 row-major matrix
-        theta0 = math.atan2(rot[3], rot[0])
-        est.reset_pose(x=float(pos[0]), y=float(pos[1]), theta=float(theta0))
-        log.event(op="pose_seeded", x=float(pos[0]), y=float(pos[1]), theta=float(theta0))
-    except Exception:
-        log.event(op="pose_seed_failed")
+    # In a standard robot controller, true world pose is not directly available.
+    # Seed from per-world spawn defaults so mapping/exploration starts in the right frame.
+    x0, y0, theta0 = resolve_initial_pose(world_name)
+    est.reset_pose(x=float(x0), y=float(y0), theta=float(theta0))
+    log.event(op="pose_seeded", x=float(x0), y=float(y0), theta=float(theta0), source="world_default")
 
     lidar = LidarWrapper(robot, name="LDS-01", timestep=TIME_STEP_MS)
     camera = CameraWrapper(robot, name="camera", timestep=TIME_STEP_MS)
     occ_grid = OccupancyGrid(width_m=20.0, height_m=20.0, resolution=0.05)
 
     # High-level plan
-    constraints = {"speed_limit": 0.5, "avoid": [], "planner": planner_settings_for_world(world_name)}
+    constraints = {
+        "speed_limit": default_speed_limit_for_world(world_name),
+        "avoid": [],
+        "planner": planner_settings_for_world(world_name),
+    }
     if plan_mode == "waypoint":
         wp = get_waypoint_plan(command)
         plan = wp.get("steps", [{"op": "stop"}]) if isinstance(wp, dict) else [{"op": "stop"}]
         constraints = wp.get("constraints", constraints) if isinstance(wp, dict) else constraints
         if not isinstance(constraints, dict):
-            constraints = {"speed_limit": 0.5, "avoid": []}
+            constraints = {"speed_limit": default_speed_limit_for_world(world_name), "avoid": []}
         if "planner" not in constraints or not isinstance(constraints.get("planner"), dict):
             constraints["planner"] = planner_settings_for_world(world_name)
         else:
             merged = planner_settings_for_world(world_name)
             merged.update(constraints.get("planner", {}))
             constraints["planner"] = merged
+        constraints["speed_limit"] = resolve_speed_limit(world_name, constraints.get("speed_limit", 0.0))
         goals_source = get_goals_source()
     else:
         plan = get_plan(command)
+        constraints["speed_limit"] = resolve_speed_limit(world_name, constraints.get("speed_limit", 0.0))
         goals_source = ""
     print("Plan:", plan)
     log.event(

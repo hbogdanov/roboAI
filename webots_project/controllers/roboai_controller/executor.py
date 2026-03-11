@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import List, Dict, Optional, Tuple, Any
 import math
+import os
 
 from config import TURN_SPEED
 from logger import RunLogger
@@ -781,7 +782,7 @@ class PlanExecutor:
                 tx = float(step.get("x", state.x))
                 ty = float(step.get("y", state.y))
                 goal_name = str(step.get("goal", "")).strip() or None
-                accept_radius = float(step.get("accept_radius", 0.08))
+                accept_radius = float(step.get("accept_radius", 0.10))
                 reached = self._goto_control(
                     state=state,
                     ir=ir,
@@ -862,6 +863,13 @@ class PlanExecutor:
                     self.last_cmd = (0.0, 0.0)
                     self.log.event(op="frontier_none")
                 else:
+                    explore_accept_radius = 0.14
+                    env_accept = os.getenv("ROBOAI_EXPLORE_ACCEPT_RADIUS", "").strip()
+                    if env_accept:
+                        try:
+                            explore_accept_radius = max(0.08, min(0.40, float(env_accept)))
+                        except Exception:
+                            pass
                     reached = self._goto_control(
                         state=state,
                         ir=ir,
@@ -869,7 +877,7 @@ class PlanExecutor:
                         target_xy=self._frontier_target,
                         mode="explore",
                         dt=dt,
-                        accept_radius=0.12,
+                        accept_radius=explore_accept_radius,
                         lidar_scan=lidar_scan,
                     )
                     if reached:

@@ -29,6 +29,43 @@ _CURRENT_GOAL_LIBRARY: Dict[str, Tuple[float, float]] = dict(DEFAULT_GOAL_LIBRAR
 _CURRENT_GOALS_SOURCE: str = "default_fallback"
 
 
+def default_speed_limit_for_world(world_name: str) -> float:
+    wn = (world_name or "").strip().lower()
+    if wn == "world_office":
+        return 0.46
+    if wn == "world_obstacles":
+        return 0.42
+    if wn == "world_empty":
+        return 0.48
+    return 0.40
+
+
+def default_goal_accept_radius_for_world(world_name: str, goal_name: str = "") -> float:
+    env_accept = os.getenv("ROBOAI_ACCEPT_RADIUS", "").strip()
+    if env_accept:
+        try:
+            return max(0.05, min(0.40, float(env_accept)))
+        except Exception:
+            pass
+
+    wn = (world_name or "").strip().lower()
+    goal = (goal_name or "").strip().lower()
+
+    if wn == "world_office":
+        if goal == "door" or goal.startswith("station_"):
+            return 0.18
+        return 0.14
+    if wn == "world_obstacles":
+        if goal == "door" or goal.startswith("station_"):
+            return 0.16
+        return 0.12
+    if wn == "world_empty":
+        return 0.12
+    if goal == "door" or goal.startswith("station_"):
+        return 0.14
+    return 0.10
+
+
 def _read_mode_file(path: str) -> str:
     if path and os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
@@ -164,6 +201,8 @@ def _resolve_goal_name(text: str, goal_library: Dict[str, Tuple[float, float]]) 
 def _fallback_waypoint_plan(command: str, goal_library: Dict[str, Tuple[float, float]]) -> Dict[str, Any]:
     t = command.lower()
     steps = []
+    world_name = resolve_world_name()
+    speed_limit = default_speed_limit_for_world(world_name)
 
     if "explore" in t and "map" in t:
         m_secs = re.search(r"(\d+(?:\.\d+)?)\s*(?:sec|second|seconds|s)\b", t)
@@ -173,7 +212,7 @@ def _fallback_waypoint_plan(command: str, goal_library: Dict[str, Tuple[float, f
     dst = _resolve_goal_name(t, goal_library=goal_library)
     if dst:
         x, y = goal_library[dst]
-        accept_radius = 0.14 if (dst == "door" or dst.startswith("station_")) else 0.10
+        accept_radius = default_goal_accept_radius_for_world(world_name, dst)
         steps.append({"op": "goto", "x": x, "y": y, "goal": dst, "accept_radius": accept_radius})
 
     if "scan" in t:
@@ -204,7 +243,7 @@ def _fallback_waypoint_plan(command: str, goal_library: Dict[str, Tuple[float, f
     return {
         "plan_id": str(uuid.uuid4()),
         "steps": steps,
-        "constraints": {"avoid": [], "speed_limit": 0.35},
+        "constraints": {"avoid": [], "speed_limit": speed_limit},
     }
 
 
@@ -232,7 +271,7 @@ def get_waypoint_plan(command: str) -> Dict[str, Any]:
             instr=command,
             pose=(0.0, 0.0, 0.0),
             goal_library=_CURRENT_GOAL_LIBRARY,
-            constraints={"avoid": [], "speed_limit": 0.35},
+            constraints={"avoid": [], "speed_limit": default_speed_limit_for_world(resolve_world_name())},
         )
     except Exception:
         return _fallback_waypoint_plan(command, goal_library=_CURRENT_GOAL_LIBRARY)
