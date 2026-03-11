@@ -201,7 +201,7 @@ class PlanExecutor:
         left_front_min = self._lidar_sector_min(ranges, angle_min, angle_inc, 35.0, 25.0, range_max)
         right_front_min = self._lidar_sector_min(ranges, angle_min, angle_inc, -35.0, 25.0, range_max)
 
-        front_stop_m = 0.08
+        front_stop_m = 0.10
 
         # Hard stop/rotate when front sector is blocked.
         if front_min < front_stop_m:
@@ -228,9 +228,60 @@ class PlanExecutor:
                 "decision": decision,
             }
 
-        # In narrow passages, do not side-bias off corridor walls.
-        # Let path tracking handle steering unless the front is truly blocked.
         return None
+
+    def _explore_plan_params(self) -> Tuple[bool, int, int, int]:
+        strict_block_unknown = bool(self._planner_cfg.get("block_unknown", True))
+        inflate_cells = max(0, int(self._planner_cfg.get("inflate_cells", 2)))
+        goal_clearance_cells = max(0, int(self._planner_cfg.get("goal_clearance_cells", 0)))
+        max_goal_snap_cells = max(1, int(self._planner_cfg.get("max_goal_snap_cells", 6)))
+        inflate_cells = max(0, inflate_cells - 1)
+        goal_clearance_cells = 0
+        max_goal_snap_cells = max(max_goal_snap_cells, 20)
+        return strict_block_unknown, inflate_cells, goal_clearance_cells, max_goal_snap_cells
+
+    def _select_reachable_frontier(self, state, occ_grid, frontiers: List[Tuple[float, float]]) -> Optional[Tuple[float, float]]:
+        if state is None or occ_grid is None or not frontiers:
+            return None
+
+        sx = float(state.x)
+        sy = float(state.y)
+        ranked = sorted(frontiers, key=lambda pt: math.hypot(pt[0] - sx, pt[1] - sy))
+        strict_block_unknown, inflate_cells, goal_clearance_cells, max_goal_snap_cells = self._explore_plan_params()
+
+        best_target: Optional[Tuple[float, float]] = None
+        best_score = float("inf")
+        for tx, ty in ranked[:10]:
+            path_world, meta = plan_world_path(
+                occ_grid=occ_grid,
+                start_xy=(sx, sy),
+                goal_xy=(tx, ty),
+                block_unknown=strict_block_unknown,
+                inflate_cells=inflate_cells,
+                goal_clearance_cells=goal_clearance_cells,
+                max_goal_snap_cells=max_goal_snap_cells,
+                return_meta=True,
+                smooth_path=False,
+            )
+            if not path_world and str(meta.get("fail_reason", "")).strip() == "unknown_path" and strict_block_unknown:
+                path_world, meta = plan_world_path(
+                    occ_grid=occ_grid,
+                    start_xy=(sx, sy),
+                    goal_xy=(tx, ty),
+                    block_unknown=False,
+                    inflate_cells=inflate_cells,
+                    goal_clearance_cells=goal_clearance_cells,
+                    max_goal_snap_cells=max_goal_snap_cells,
+                    return_meta=True,
+                    smooth_path=False,
+                )
+            if not path_world:
+                continue
+            score = float(len(path_world))
+            if score < best_score:
+                best_score = score
+                best_target = (tx, ty)
+        return best_target
 
     def _record_nav_failure(self, mode: str, reason: str, tx: float, ty: float, extra: Optional[Dict[str, Any]] = None):
         payload = {"op": "goto_failed", "mode": mode, "tx": tx, "ty": ty, "fail_reason": reason}
@@ -267,14 +318,21 @@ class PlanExecutor:
         if occ_grid is not None:
             try:
                 strict_block_unknown = bool(self._planner_cfg.get("block_unknown", True))
+                inflate_cells = max(0, int(self._planner_cfg.get("inflate_cells", 2)))
+                goal_clearance_cells = max(0, int(self._planner_cfg.get("goal_clearance_cells", 0)))
+                max_goal_snap_cells = max(1, int(self._planner_cfg.get("max_goal_snap_cells", 6)))
+
+                if mode == "explore":
+                    strict_block_unknown, inflate_cells, goal_clearance_cells, max_goal_snap_cells = self._explore_plan_params()
+
                 path_world, meta = plan_world_path(
                     occ_grid=occ_grid,
                     start_xy=(float(state.x), float(state.y)),
                     goal_xy=(tx, ty),
                     block_unknown=strict_block_unknown,
-                    inflate_cells=max(0, int(self._planner_cfg.get("inflate_cells", 2))),
-                    goal_clearance_cells=max(0, int(self._planner_cfg.get("goal_clearance_cells", 0))),
-                    max_goal_snap_cells=max(1, int(self._planner_cfg.get("max_goal_snap_cells", 6))),
+                    inflate_cells=inflate_cells,
+                    goal_clearance_cells=goal_clearance_cells,
+                    max_goal_snap_cells=max_goal_snap_cells,
                     return_meta=True,
                     smooth_path=False,
                 )
@@ -285,9 +343,9 @@ class PlanExecutor:
                         start_xy=(float(state.x), float(state.y)),
                         goal_xy=(tx, ty),
                         block_unknown=False,
-                        inflate_cells=max(0, int(self._planner_cfg.get("inflate_cells", 2))),
-                        goal_clearance_cells=max(0, int(self._planner_cfg.get("goal_clearance_cells", 0))),
-                        max_goal_snap_cells=max(1, int(self._planner_cfg.get("max_goal_snap_cells", 6))),
+                        inflate_cells=inflate_cells,
+                        goal_clearance_cells=goal_clearance_cells,
+                        max_goal_snap_cells=max_goal_snap_cells,
                         return_meta=True,
                         smooth_path=False,
                     )
@@ -345,13 +403,6 @@ class PlanExecutor:
                 else:
                     fail_reason = str(meta.get("fail_reason", "")).strip() or "unknown_path"
                     if fail_reason == "unknown_path":
-                        # Keep going with direct local targeting when global path is temporarily unavailable.
-                        if prev_path:
-                            self._nav_path = prev_path
-                            self._nav_wp_idx = min(prev_wp_idx, max(0, len(prev_path) - 1))
-                        elif self._last_good_nav_path:
-                            self._nav_path = list(self._last_good_nav_path)
-                            self._nav_wp_idx = min(self._last_good_nav_wp_idx, max(0, len(self._nav_path) - 1))
                         self.log.event(
                             op="path_plan_unavailable",
                             mode=mode,
@@ -370,6 +421,23 @@ class PlanExecutor:
                             goal_used=meta.get("goal_grid_used"),
                             fail_reason=fail_reason,
                         )
+                        if mode == "explore":
+                            self._record_nav_failure(
+                                mode=mode,
+                                reason=fail_reason,
+                                tx=tx,
+                                ty=ty,
+                                extra={"attempt": self._nav_replan_attempts},
+                            )
+                            self._nav_target = None
+                            self._recovery_s = 0.0
+                            return False
+                        if prev_path:
+                            self._nav_path = prev_path
+                            self._nav_wp_idx = min(prev_wp_idx, max(0, len(prev_path) - 1))
+                        elif self._last_good_nav_path:
+                            self._nav_path = list(self._last_good_nav_path)
+                            self._nav_wp_idx = min(self._last_good_nav_wp_idx, max(0, len(self._nav_path) - 1))
                         self.log.event(op="goto_start", mode=mode, tx=tx, ty=ty)
                         self._set_state("NAVIGATE", reason=f"{mode}_start_no_global_path")
                         return True
@@ -849,9 +917,11 @@ class PlanExecutor:
                 # Refresh frontier target periodically or when no target exists.
                 need_refresh = self._frontier_target is None or self._frontier_refresh_timer >= self._frontier_refresh_s
                 if need_refresh:
-                    frontiers = frontier_points_world(occ_grid)
+                    frontiers = frontier_points_world(occ_grid, obstacle_clearance_cells=2)
                     self.log.event(op="frontier_detected", count=len(frontiers))
-                    target = self._nearest_point(float(state.x), float(state.y), frontiers)
+                    target = self._select_reachable_frontier(state=state, occ_grid=occ_grid, frontiers=frontiers)
+                    if target is None and frontiers:
+                        self.log.event(op="frontier_unreachable", count=len(frontiers))
                     self._frontier_target = target
                     self._frontier_refresh_timer = 0.0
                     if target is not None:

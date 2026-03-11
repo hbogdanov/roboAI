@@ -15,7 +15,7 @@ WORLD_FILES = {
 }
 
 COMMANDS = {
-    "explore_map": "explore the room and build a map",
+    "explore_map": "explore the room and build a map for 60 seconds",
     "goal_navigation": "go to station A and face 90 degrees",
     "scan_return": "go to the door, scan, and return to base",
 }
@@ -26,7 +26,7 @@ def main():
     parser.add_argument("--world", choices=sorted(WORLD_FILES.keys()), required=True)
     parser.add_argument("--command", choices=sorted(COMMANDS.keys()), default="explore_map")
     parser.add_argument("--trials", type=int, default=20)
-    parser.add_argument("--run-seconds", type=int, default=25)
+    parser.add_argument("--run-seconds", type=int, default=60)
     parser.add_argument("--batch-name", default="")
     args = parser.parse_args()
 

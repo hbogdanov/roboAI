@@ -21,7 +21,7 @@ import roboai_controller  # noqa: E402
 def test_resolve_initial_pose_defaults_for_office(monkeypatch):
     monkeypatch.delenv("ROBOAI_INITIAL_POSE", raising=False)
     x, y, theta = roboai_controller.resolve_initial_pose("world_office")
-    assert (x, y, theta) == (-0.55, -0.55, 0.0)
+    assert (x, y, theta) == (-0.45, 0.0, 0.0)
 
 
 def test_resolve_initial_pose_env_override(monkeypatch):

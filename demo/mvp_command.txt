@@ -1,1 +1,1 @@
-go to station A and face 90 degrees
+explore the room and build a map for 60 seconds
