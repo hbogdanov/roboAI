@@ -1,6 +1,6 @@
 # RoboAI
 
-RoboAI — Autonomous Exploration and Path Planning Benchmark Platform
+RoboAI - Autonomous Exploration and Path Planning Benchmark Platform
 
 Built a deterministic 2D robotics benchmark for occupancy-grid mapping, frontier-based exploration, and collision-aware path planning. The platform simulates lidar sensing, updates an exploration map online, plans routes to frontiers using A*, RRT, and RRT*, and exports replayable demos plus benchmarking metrics across indoor maps.
 
@@ -25,7 +25,6 @@ src/roboai/
 tests/
 demo/
 reports/
-archive/webots_legacy/
 ```
 
 ## Quick Start
