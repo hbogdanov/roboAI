@@ -1,0 +1,20 @@
+{
+  "astar": {
+    "success_rate": 0.0,
+    "mean_path_length": 5.663085602653975,
+    "mean_runtime_seconds": 2.3848557999999684,
+    "mean_coverage": 0.3768402777777778
+  },
+  "rrt": {
+    "success_rate": 0.0,
+    "mean_path_length": 5.376980653453604,
+    "mean_runtime_seconds": 1.9286912500001563,
+    "mean_coverage": 0.36406249999999996
+  },
+  "rrt_star": {
+    "success_rate": 0.0,
+    "mean_path_length": 5.636138711970711,
+    "mean_runtime_seconds": 7.982258999999885,
+    "mean_coverage": 0.3560416666666667
+  }
+}

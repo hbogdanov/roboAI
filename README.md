@@ -1,117 +1,72 @@
 # RoboAI
 
-RoboAI is a Webots-based autonomous robot system implementing frontier exploration, obstacle avoidance, and path planning in simulated indoor environments.
+RoboAI — Autonomous Exploration and Path Planning Benchmark Platform
 
-## Overview
-
-RoboAI runs a differential-drive robot in Webots and combines lidar mapping, frontier detection, closed-loop navigation, and autonomous exploration in office-style worlds. The system builds an occupancy grid online, selects frontier targets, plans collision-aware routes, and drives the robot through the environment while logging artifacts for evaluation.
+Built a deterministic 2D robotics benchmark for occupancy-grid mapping, frontier-based exploration, and collision-aware path planning. The platform simulates lidar sensing, updates an exploration map online, plans routes to frontiers using A*, RRT, and RRT*, and exports replayable demos plus benchmarking metrics across indoor maps.
 
 ## Features
 
-- frontier-based exploration
-- grid-based path planning fallback
-- lidar-based obstacle detection
-- PID-style differential drive control
+- deterministic 2D simulation
+- simulated lidar
 - occupancy grid mapping
+- frontier exploration
+- A*, RRT, and RRT* planning
+- waypoint following
+- coverage and efficiency metrics
+- GIF / MP4 demo export
 
-## System Architecture
-
-![RoboAI system architecture](media/architecture.png)
-
-Core autonomy flow:
-
-```text
-Lidar -> Occupancy Grid
-      -> Frontier Detector
-      -> Path Planner
-      -> PID Controller
-      -> Differential Drive Robot
-```
-
-Main runtime components:
-
-- `webots_project/controllers/roboai_controller/occupancy_grid.py`: builds and updates the occupancy grid from lidar scans.
-- `webots_project/controllers/roboai_controller/frontier.py`: finds free-to-unknown frontier cells for exploration.
-- `webots_project/controllers/roboai_controller/path_planner.py`: computes collision-aware waypoint paths over the occupancy grid.
-- `webots_project/controllers/roboai_controller/executor.py`: handles exploration, local avoidance, heading correction, and waypoint tracking.
-- `webots_project/controllers/roboai_controller/roboai_controller.py`: main Webots controller loop and artifact export.
-
-## Demo
-
-![Webots exploration demo](media/demo.gif)
-
-`media/demo.gif` is wired into the README and currently acts as a placeholder asset. Replace it with a 10-second Webots capture of the robot exploring `world_office.wbt`.
-
-## Project Structure
+## Structure
 
 ```text
-.github/workflows/                 GitHub Actions CI
-webots_project/
-  controllers/roboai_controller/   Main autonomy stack
-  controllers/roboai_supervisor/   Evaluation supervisor
-  config/goals/                    Named waypoint goals per world
-  worlds/                          Webots environments
-demo/                              Demo command presets
-scripts/                           Evaluation and reporting utilities
-tests/                             Unit tests for planning and perception
-reports/                           Generated maps, plots, and summaries
-media/                             README assets
+src/roboai/
+  core/
+  sim/
+  app/
+tests/
+demo/
+reports/
+archive/webots_legacy/
 ```
 
-Key worlds:
-
-- `webots_project/worlds/world_office.wbt`
-- `webots_project/worlds/world_obstacles.wbt`
-- `webots_project/worlds/world_empty.wbt`
-
-## How to Run
-
-1. Install dependencies:
+## Quick Start
 
 ```bash
-pip install -r requirements.txt
+pip install -e .
+python -m roboai.app.run_demo --map office --planner astar --seed 7
 ```
 
-2. Open a Webots world such as `webots_project/worlds/world_office.wbt`.
+Outputs are written under `demo/` and `reports/`.
 
-3. Select the exploration demo:
+`run_demo` uses map-specific default coverage goals and step budgets so each built-in map produces a stable, presentable exploration run without extra tuning.
 
-```bash
-python scripts/select_demo.py --demo demo2
-```
+Built-in maps:
 
-4. Start the simulation in Webots.
+- `empty`
+- `office`
+- `cluttered`
+- `narrow`
+- `maze`
 
-Useful follow-up reports:
+## Results
 
-```bash
-python scripts/log_summary.py
-python scripts/evaluate_mvp.py
-python scripts/evaluate_world_batch.py
-```
+Typical outputs after running a demo:
 
-Generated artifacts include occupancy maps, run summaries, and JSON logs under `reports/` and `data/logs/`.
+- final map image: `reports/final_map_<map>_<planner>.png`
+- trajectory and exploration replay: `demo/demo_<map>_<planner>.gif` and `demo/demo_<map>_<planner>.mp4`
+- metrics: `reports/metrics_<map>_<planner>_seed<seed>.json`
 
-## Benchmark Numbers
+Example artifacts already produced in this repo:
 
-The batch-evaluation table is generated from saved run logs, not hardcoded values. To produce real numbers for the office, obstacles, and empty worlds:
+- [final_map_office_astar.png](/abs/path/c:/Users/Ivan/roboAI/reports/final_map_office_astar.png)
+- [demo_office_astar.gif](/abs/path/c:/Users/Ivan/roboAI/demo/demo_office_astar.gif)
+- [metrics_office_astar_seed7.json](/abs/path/c:/Users/Ivan/roboAI/reports/metrics_office_astar_seed7.json)
 
-1. Run multiple trials in Webots and keep the generated `data/logs/run_*.json` files.
-2. Make sure each run records the correct `world_name` in its `plan_built` event.
-3. Aggregate the logs:
+Example metrics:
 
-```bash
-python scripts/evaluate_world_batch.py --log-dir data/logs
-```
-
-4. Read the resulting summaries in `reports/world_batch_eval.md` and `reports/world_batch_eval.json`.
-
-For the MVP benchmark summary, run:
-
-```bash
-python scripts/evaluate_mvp.py --log-dir data/logs
-```
-
-## Testing And CI
-
-Automated tests cover planner behavior, frontier extraction, perception helpers, controller execution edge cases, and evaluation aggregation. GitHub Actions runs the suite on every push and pull request using `.github/workflows/ci.yml`.
+| map | planner | success | coverage | path length | collisions | replans |
+| --- | --- | --- | --- | --- | --- | --- |
+| empty | astar | true | 0.802 | 5.76 | 0 | 2 |
+| office | astar | true | 0.654 | 11.93 | 0 | 3 |
+| cluttered | astar | true | 0.754 | 14.67 | 2 | 5 |
+| narrow | astar | true | 0.601 | 14.29 | 1 | 4 |
+| maze | astar | true | 0.451 | 22.17 | 0 | 7 |
