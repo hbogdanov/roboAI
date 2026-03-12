@@ -1,26 +1,4 @@
-# Core Python scientific stack
-numpy
-pandas
-matplotlib
-plotly           
-networkx
-seaborn         
-
-# Machine Learning / Transformers
-torch
-transformers
-datasets
-accelerate
-sentencepiece
-scikit-learn
-
-# Experiment & Visualization Utilities
-tqdm             
-rich             
-PyYAML           
-python-dotenv    
-
-# Notebooks & Interactivity
-jupyter
-jupyterlab
-ipywidgets
+matplotlib>=3.8
+numpy>=1.26
+opencv-python>=4.10
+pytest>=8.0
