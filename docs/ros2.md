@@ -14,6 +14,25 @@ Current scope:
 - `/scan`, `/odom`, `/map`, `/goal`, `/path`, `/cmd_vel`
 - launchable node stack for TurtleBot3 integration
 
+Note: The ROS2 nodes import the core RoboAI modules.
+
+If running from the workspace, ensure the Python path includes the benchmark core:
+
+```bash
+export PYTHONPATH=$(pwd)/../src:$PYTHONPATH
+```
+
+If Gazebo GUI crashes (`gzclient`), the simulation backend (`gzserver`) may still run.
+
+You can still validate the stack via:
+
+```bash
+ros2 topic hz /scan
+ros2 topic echo /odom
+```
+
+RViz visualization is recommended for debugging.
+
 Not yet at parity with the benchmark runtime:
 
 - full semantic frontier scoring
