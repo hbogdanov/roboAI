@@ -1,20 +1,42 @@
 {
-  "astar": {
+  "astar/naive/temporary_block/noisy": {
     "success_rate": 0.0,
-    "mean_path_length": 5.663085602653975,
-    "mean_runtime_seconds": 2.3848557999999684,
-    "mean_coverage": 0.3768402777777778
+    "mean_coverage": 0.545625,
+    "mean_path_length": 5.024102296329499,
+    "mean_runtime_seconds": 4.203226249999716,
+    "mean_collisions": 0.0,
+    "mean_replans": 1.0,
+    "mean_replan_triggers": 3.0,
+    "mean_recovery_events": 0.0
   },
-  "rrt": {
+  "astar/information_gain/temporary_block/noisy": {
     "success_rate": 0.0,
-    "mean_path_length": 5.376980653453604,
-    "mean_runtime_seconds": 1.9286912500001563,
-    "mean_coverage": 0.36406249999999996
+    "mean_coverage": 0.545625,
+    "mean_path_length": 5.024102296329499,
+    "mean_runtime_seconds": 3.974291999998968,
+    "mean_collisions": 0.0,
+    "mean_replans": 1.0,
+    "mean_replan_triggers": 3.0,
+    "mean_recovery_events": 0.0
   },
-  "rrt_star": {
+  "hybrid/naive/temporary_block/noisy": {
     "success_rate": 0.0,
-    "mean_path_length": 5.636138711970711,
-    "mean_runtime_seconds": 7.982258999999885,
-    "mean_coverage": 0.3560416666666667
+    "mean_coverage": 0.545625,
+    "mean_path_length": 5.024102296329499,
+    "mean_runtime_seconds": 6.6557821500009595,
+    "mean_collisions": 0.0,
+    "mean_replans": 1.0,
+    "mean_replan_triggers": 3.0,
+    "mean_recovery_events": 0.0
+  },
+  "hybrid/information_gain/temporary_block/noisy": {
+    "success_rate": 0.0,
+    "mean_coverage": 0.545625,
+    "mean_path_length": 5.024102296329499,
+    "mean_runtime_seconds": 7.104858250000689,
+    "mean_collisions": 0.0,
+    "mean_replans": 1.0,
+    "mean_replan_triggers": 3.0,
+    "mean_recovery_events": 0.0
   }
 }

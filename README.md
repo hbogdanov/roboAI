@@ -4,63 +4,81 @@ RoboAI - Autonomous Exploration and Path Planning Benchmark Platform
 
 Built a deterministic 2D robotics benchmark for occupancy-grid mapping, frontier-based exploration, and collision-aware path planning. The platform simulates lidar sensing, updates an exploration map online, plans routes to frontiers using A*, RRT, and RRT*, and exports replayable demos plus benchmarking metrics across indoor maps.
 
-## Features
+![Office exploration demo](demo/demo_office_astar.gif)
 
-- deterministic 2D simulation
-- simulated lidar
-- occupancy grid mapping
-- frontier exploration
-- A*, RRT, and RRT* planning
-- waypoint following
-- coverage and efficiency metrics
-- GIF / MP4 demo export
+## Overview
 
-## Structure
+RoboAI focuses on the core autonomy loop instead of simulator integration overhead: lidar sensing, online occupancy mapping, frontier extraction, target ranking, planner selection, waypoint following, local recovery, and benchmark reporting. The current system ships with five built-in 2D indoor maps and three planner backends, plus reproducible demo and batch benchmarking entrypoints.
 
-```text
-src/roboai/
-  core/
-  sim/
-  app/
-tests/
-demo/
-reports/
+## System Architecture
+
+```mermaid
+flowchart LR
+    A[Lidar Scan] --> B[Occupancy Update]
+    B --> C[Frontier Extraction]
+    C --> D[Target Ranking]
+    D --> E[Planner Backend]
+    E --> F[Waypoint Follower]
+    F --> G[Local Recovery]
+    G --> A
 ```
 
-## Quick Start
+## Methods
+
+### Occupancy Mapping
+
+The simulator performs deterministic 2D ray casting and updates a discrete occupancy grid online. Unknown cells become free along traversed beams, and occupied hits are sticky once observed so wall evidence remains stable for the rest of the run.
+
+### Frontier Selection
+
+Frontiers are defined as free cells adjacent to unknown cells. Frontier regions are grouped by connected components, ranked by distance, heading consistency, and region size, and filtered by blocked-target history so the robot does not keep retrying the same failed frontier.
+
+### Planner Backends
+
+`astar` is the reference planner for grid-based collision-aware routing. `rrt` and `rrt_star` provide sampling-based alternatives for the same benchmark interface. The batch benchmark compares all three against identical maps and seeds.
+
+### Waypoint Follower / Local Recovery
+
+Planned paths are followed with a lightweight waypoint controller. The controller rotates in place when heading error is large, applies a forward-arc emergency stop, replans on collision, and runs a short recovery rotation when coverage stagnates.
+
+## Benchmark Protocol
+
+Official benchmark suite:
 
 ```bash
-pip install -e .
-python -m roboai.app.run_demo --map office --planner astar --seed 7
+python -m roboai.app.run_batch \
+  --maps empty office cluttered narrow maze \
+  --planners astar rrt rrt_star \
+  --seeds 1 7 13 \
+  --write-run-artifacts
 ```
 
-Outputs are written under `demo/` and `reports/`.
+`run_batch` reuses the map-specific defaults from `run_demo`, so `empty`, `office`, `cluttered`, `narrow`, and `maze` each use their own default coverage targets and step budgets unless explicitly overridden.
 
-`run_demo` uses map-specific default coverage goals and step budgets so each built-in map produces a stable, presentable exploration run without extra tuning.
+Primary outputs:
 
-Built-in maps:
-
-- `empty`
-- `office`
-- `cluttered`
-- `narrow`
-- `maze`
+- per-run metrics: [`reports/batch_metrics.csv`](reports/batch_metrics.csv)
+- aggregated summary: [`reports/batch_summary.md`](reports/batch_summary.md)
+- success plot: [`reports/success_rate_by_planner.png`](reports/success_rate_by_planner.png)
+- coverage plot: [`reports/coverage_vs_time.png`](reports/coverage_vs_time.png)
+- runtime plot: [`reports/runtime_by_planner.png`](reports/runtime_by_planner.png)
 
 ## Results
 
-Typical outputs after running a demo:
+Example generated artifacts:
 
-- final map image: `reports/final_map_<map>_<planner>.png`
-- trajectory and exploration replay: `demo/demo_<map>_<planner>.gif` and `demo/demo_<map>_<planner>.mp4`
-- metrics: `reports/metrics_<map>_<planner>_seed<seed>.json`
+- final map: ![Office final map](reports/final_map_office_astar.png)
+- benchmark coverage plot: ![Coverage vs time](reports/coverage_vs_time.png)
 
-Example artifacts already produced in this repo:
+Planner comparison from the current benchmark summary:
 
-- [final_map_office_astar.png](/abs/path/c:/Users/Ivan/roboAI/reports/final_map_office_astar.png)
-- [demo_office_astar.gif](/abs/path/c:/Users/Ivan/roboAI/demo/demo_office_astar.gif)
-- [metrics_office_astar_seed7.json](/abs/path/c:/Users/Ivan/roboAI/reports/metrics_office_astar_seed7.json)
+| planner | success rate | mean coverage | mean path length | mean runtime (s) | mean collisions | mean replans |
+| --- | --- | --- | --- | --- | --- | --- |
+| astar | 1.000 | 0.652 | 13.77 | 5.15 | 0.60 | 4.20 |
+| rrt | 0.933 | 0.653 | 15.87 | 6.98 | 0.07 | 6.47 |
+| rrt_star | 0.933 | 0.654 | 14.16 | 24.29 | 0.80 | 6.07 |
 
-Example metrics:
+Representative per-map demo outcomes with the current defaults:
 
 | map | planner | success | coverage | path length | collisions | replans |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -69,3 +87,34 @@ Example metrics:
 | cluttered | astar | true | 0.754 | 14.67 | 2 | 5 |
 | narrow | astar | true | 0.601 | 14.29 | 1 | 4 |
 | maze | astar | true | 0.451 | 22.17 | 0 | 7 |
+
+## Failure Modes
+
+- Long corridor and maze runs can still spend too much time on frontier retries before switching targets.
+- `rrt_star` remains the most expensive backend and can dominate benchmark runtime.
+- Sampling planners are more sensitive to narrow passages and frontier placement than `astar`.
+- Recovery is heuristic; it is effective for local stagnation, but it is not a formal hybrid planning policy yet.
+
+## Known Limitations
+
+- assumes perfect localization
+- uses 2D binary obstacle maps
+- does not model wheel slip
+- simulated lidar is idealized
+- planner runtime is CPU-only and single-threaded
+
+## Future Work
+
+- add path smoothing and report raw vs smoothed path quality
+- evaluate naive vs information-gain frontier ranking
+- add dynamic obstacle and disturbance experiments
+- add sensor and localization noise for robustness studies
+- formalize hybrid planner fallback policies
+- add config profiles, lint/type tooling, and a lightweight benchmark report workflow
+
+## Quick Start
+
+```bash
+pip install -e .
+python -m roboai.app.run_demo --map office --planner astar --seed 7
+```

@@ -5,7 +5,7 @@
   "success": true,
   "stop_reason": "coverage_goal_reached",
   "steps": 130,
-  "runtime_seconds": 3.518446799999765,
+  "runtime_seconds": 5.88798289999977,
   "coverage": 0.6525,
   "path_length": 11.019140415641626,
   "collisions": 0,

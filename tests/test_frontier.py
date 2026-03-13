@@ -31,3 +31,24 @@ def test_rank_frontier_targets_returns_multiple_candidates():
     targets = rank_frontier_targets(grid, robot_xy=(1.5, 1.5))
     assert len(targets) >= 2
     assert targets[0][0] < 5.0
+
+
+def test_information_gain_frontier_prefers_larger_unknown_region():
+    grid = OccupancyGrid(width=12, height=12, resolution=1.0)
+    for gx in range(1, 6):
+        grid.set_cell(gx, 2, FREE)
+    for gx in range(1, 7):
+        for gy in range(1, 5):
+            grid.set_cell(gx, gy, FREE)
+    for gy in range(4, 10):
+        grid.set_cell(9, gy, FREE)
+    for gy in range(3, 10):
+        grid.set_cell(8, gy, FREE)
+
+    naive_targets = rank_frontier_targets(grid, robot_xy=(1.5, 2.5), policy="naive")
+    info_targets = rank_frontier_targets(grid, robot_xy=(1.5, 2.5), policy="information_gain")
+
+    assert naive_targets
+    assert info_targets
+    assert naive_targets[0][0] < 7.0
+    assert info_targets[0][0] >= 7.0

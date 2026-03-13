@@ -41,6 +41,8 @@ class RenderFrame:
 class RunMetrics:
     map_name: str
     planner_name: str
+    planner_policy: str
+    frontier_policy: str
     seed: int
     success: bool
     stop_reason: str
@@ -48,8 +50,18 @@ class RunMetrics:
     runtime_seconds: float
     coverage: float
     path_length: float
+    raw_path_length: float
+    smoothed_path_length: float
+    path_turn_count: int
     collisions: int
     replans: int
+    replan_triggers: int
+    recovery_events: int
+    disturbance_name: str
+    disturbance_events: int
+    range_noise_std: float
+    dropout_prob: float
+    pose_noise_std: float
     explored_cells: int
     known_cells: int
     coverage_history: list[float] = field(default_factory=list)
