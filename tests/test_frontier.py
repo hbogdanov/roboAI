@@ -1,5 +1,6 @@
 from roboai.core.frontier import frontier_cells, frontier_regions, rank_frontier_targets, select_frontier_target
 from roboai.core.occupancy_grid import FREE, OccupancyGrid
+from roboai.sim.grid2d.maps import SEMANTIC_EXIT
 
 
 def test_frontier_detection_groups_adjacent_frontiers():
@@ -52,3 +53,24 @@ def test_information_gain_frontier_prefers_larger_unknown_region():
     assert info_targets
     assert naive_targets[0][0] < 7.0
     assert info_targets[0][0] >= 7.0
+
+
+def test_semantic_frontier_prefers_semantic_rich_target():
+    grid = OccupancyGrid(width=12, height=12, resolution=1.0)
+    for gx in range(1, 4):
+        grid.set_cell(gx, 1, FREE)
+    for gy in range(5, 8):
+        grid.set_cell(8, gy, FREE)
+    semantic_grid = grid.grid.copy().astype("int8")
+    semantic_grid[:] = 0
+    semantic_grid[5:8, 7:10] = SEMANTIC_EXIT
+
+    targets = rank_frontier_targets(
+        grid,
+        robot_xy=(1.5, 1.5),
+        policy="semantic_information_gain",
+        semantic_grid=semantic_grid,
+    )
+
+    assert targets
+    assert targets[0][0] > 6.0

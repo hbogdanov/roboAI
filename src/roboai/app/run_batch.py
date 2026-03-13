@@ -25,6 +25,8 @@ def main() -> None:
     parser.add_argument("--range-noise-std", type=float, default=0.0)
     parser.add_argument("--dropout-prob", type=float, default=0.0)
     parser.add_argument("--pose-noise-std", type=float, default=0.0)
+    parser.add_argument("--semantic-mode", choices=["enabled", "disabled"], default="enabled")
+    parser.add_argument("--frontier-model", default=None)
     parser.add_argument("--write-run-artifacts", action="store_true")
     args = parser.parse_args()
 
@@ -46,6 +48,8 @@ def main() -> None:
                         range_noise_std=args.range_noise_std,
                         dropout_prob=args.dropout_prob,
                         pose_noise_std=args.pose_noise_std,
+                        semantic_mode=args.semantic_mode,
+                        frontier_model_path=args.frontier_model,
                     )
                     metrics_list.append(metrics)
                     write_metrics_json(
@@ -156,6 +160,7 @@ def _write_summary_json(path: Path, metrics_list) -> None:
             "mean_replans": _mean([float(item.replans) for item in items]),
             "mean_replan_triggers": _mean([float(item.replan_triggers) for item in items]),
             "mean_recovery_events": _mean([float(item.recovery_events) for item in items]),
+            "mean_final_localization_uncertainty": _mean([float(item.final_localization_uncertainty) for item in items]),
         }
         for planner, items in by_planner.items()
     }
@@ -170,8 +175,8 @@ def _write_summary_markdown(path: Path, metrics_list) -> None:
     lines = [
         "# Official Benchmark Summary",
         "",
-        "| planner/policy | success rate | mean coverage | mean path length | mean runtime (s) | mean collisions | mean replans | mean recovery events |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| planner/policy | success rate | mean coverage | mean path length | mean runtime (s) | mean collisions | mean replans | mean recovery events | mean final uncertainty |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for planner, items in by_planner.items():
         lines.append(
@@ -183,7 +188,8 @@ def _write_summary_markdown(path: Path, metrics_list) -> None:
             f"{_mean([item.runtime_seconds for item in items]):.2f} | "
             f"{_mean([float(item.collisions) for item in items]):.2f} | "
             f"{_mean([float(item.replans) for item in items]):.2f} | "
-            f"{_mean([float(item.recovery_events) for item in items]):.2f} |"
+            f"{_mean([float(item.recovery_events) for item in items]):.2f} | "
+            f"{_mean([float(item.final_localization_uncertainty) for item in items]):.2f} |"
         )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -198,6 +204,8 @@ def _series_label(item) -> str:
     label = f"{item.planner_name}/{item.frontier_policy}"
     if item.disturbance_name != "none":
         label += f"/{item.disturbance_name}"
+    if item.semantic_mode != "enabled":
+        label += "/no-semantics"
     if item.range_noise_std > 0.0 or item.dropout_prob > 0.0 or item.pose_noise_std > 0.0:
         label += "/noisy"
     return label

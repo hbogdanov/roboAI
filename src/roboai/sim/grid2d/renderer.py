@@ -21,6 +21,13 @@ OCCUPANCY_CMAP = ListedColormap([
     "#ffd166",  # occupied
 ])
 OCCUPANCY_NORM = BoundaryNorm([-1.5, -0.5, 0.5, 1.5], OCCUPANCY_CMAP.N)
+SEMANTIC_COLORS = {
+    1: "#2a9d8f",
+    2: "#457b9d",
+    3: "#e76f51",
+    4: "#f4a261",
+    5: "#90be6d",
+}
 
 
 def save_run_artifacts(
@@ -42,10 +49,12 @@ def _save_final_map(path, obstacle_grid, resolution, frame):
     fig, ax = plt.subplots(figsize=(7, 7))
     ax.imshow(obstacle_grid, origin="lower", cmap="gray_r", alpha=0.25)
     ax.imshow(frame.occupancy, origin="lower", cmap=OCCUPANCY_CMAP, norm=OCCUPANCY_NORM, alpha=0.95)
+    _draw_semantics(ax, frame.semantic_overlay, resolution)
     if frame.trajectory:
         xs = [x / resolution for x, _ in frame.trajectory]
         ys = [y / resolution for _, y in frame.trajectory]
         ax.plot(xs, ys, color="tab:orange", linewidth=2.0)
+    _draw_additional_trajectories(ax, frame.additional_trajectories, resolution)
     if frame.planner_path:
         px = [x / resolution for x, _ in frame.planner_path]
         py = [y / resolution for _, y in frame.planner_path]
@@ -54,15 +63,8 @@ def _save_final_map(path, obstacle_grid, resolution, frame):
         fx = [x / resolution for x, _ in frame.frontier_points]
         fy = [y / resolution for _, y in frame.frontier_points]
         ax.scatter(fx, fy, s=8, c="red")
-    ax.scatter(
-        [frame.robot_pose.x / resolution],
-        [frame.robot_pose.y / resolution],
-        c="white",
-        edgecolors="black",
-        s=70,
-        zorder=5,
-    )
-    ax.set_title("Final explored map")
+    _draw_robot_markers(ax, frame, resolution)
+    ax.set_title(f"Final explored map | uncertainty {frame.localization_uncertainty:.2f}")
     fig.tight_layout()
     fig.savefig(path, dpi=140)
     plt.close(fig)
@@ -88,9 +90,11 @@ def _save_demo_gif(path, obstacle_grid, resolution, frames):
         ax.imshow(obstacle_grid, origin="lower", cmap="gray_r", alpha=0.25)
         frame = frames[frame_index]
         ax.imshow(frame.occupancy, origin="lower", cmap=OCCUPANCY_CMAP, norm=OCCUPANCY_NORM, alpha=0.95)
+        _draw_semantics(ax, frame.semantic_overlay, resolution)
         xs = [x / resolution for x, _ in frame.trajectory]
         ys = [y / resolution for _, y in frame.trajectory]
         ax.plot(xs, ys, color="tab:orange", linewidth=2.0)
+        _draw_additional_trajectories(ax, frame.additional_trajectories, resolution)
         if frame.planner_path:
             px = [x / resolution for x, _ in frame.planner_path]
             py = [y / resolution for _, y in frame.planner_path]
@@ -99,15 +103,8 @@ def _save_demo_gif(path, obstacle_grid, resolution, frames):
             fx = [x / resolution for x, _ in frame.frontier_points]
             fy = [y / resolution for _, y in frame.frontier_points]
             ax.scatter(fx, fy, s=8, c="red")
-        ax.scatter(
-            [frame.robot_pose.x / resolution],
-            [frame.robot_pose.y / resolution],
-            c="white",
-            edgecolors="black",
-            s=70,
-            zorder=5,
-        )
-        ax.set_title(f"Coverage {frame.coverage:.2f}")
+        _draw_robot_markers(ax, frame, resolution)
+        ax.set_title(f"Coverage {frame.coverage:.2f} | uncertainty {frame.localization_uncertainty:.2f}")
         return []
 
     frame_count = max(1, len(frames))
@@ -140,10 +137,12 @@ def _render_frame_array(obstacle_grid, frame, resolution):
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.imshow(obstacle_grid, origin="lower", cmap="gray_r", alpha=0.25)
     ax.imshow(frame.occupancy, origin="lower", cmap=OCCUPANCY_CMAP, norm=OCCUPANCY_NORM, alpha=0.95)
+    _draw_semantics(ax, frame.semantic_overlay, resolution)
     if frame.trajectory:
         xs = [x / resolution for x, _ in frame.trajectory]
         ys = [y / resolution for _, y in frame.trajectory]
         ax.plot(xs, ys, color="tab:orange", linewidth=2.0)
+    _draw_additional_trajectories(ax, frame.additional_trajectories, resolution)
     if frame.planner_path:
         px = [x / resolution for x, _ in frame.planner_path]
         py = [y / resolution for _, y in frame.planner_path]
@@ -152,11 +151,45 @@ def _render_frame_array(obstacle_grid, frame, resolution):
         fx = [x / resolution for x, _ in frame.frontier_points]
         fy = [y / resolution for _, y in frame.frontier_points]
         ax.scatter(fx, fy, s=8, c="red")
-    ax.scatter([frame.robot_pose.x / resolution], [frame.robot_pose.y / resolution], c="white", edgecolors="black", s=70)
-    ax.set_title(f"Coverage {frame.coverage:.2f}")
+    _draw_robot_markers(ax, frame, resolution)
+    ax.set_title(f"Coverage {frame.coverage:.2f} | uncertainty {frame.localization_uncertainty:.2f}")
     fig.tight_layout()
     fig.canvas.draw()
     image = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
     image = image.reshape(fig.canvas.get_width_height()[::-1] + (4,))[:, :, :3]
     plt.close(fig)
     return image
+
+
+def _draw_semantics(ax, semantic_overlay, resolution):
+    if semantic_overlay is None:
+        return
+    for semantic_id, color in SEMANTIC_COLORS.items():
+        ys, xs = np.nonzero(semantic_overlay == semantic_id)
+        if len(xs) == 0:
+            continue
+        ax.scatter(xs, ys, s=5, c=color, alpha=0.45, linewidths=0)
+
+
+def _draw_robot_markers(ax, frame, resolution):
+    robot_poses = frame.robot_poses or [frame.robot_pose]
+    colors = ["white", "#ffcad4", "#caffbf", "#a0c4ff"]
+    for idx, pose in enumerate(robot_poses):
+        ax.scatter(
+            [pose.x / resolution],
+            [pose.y / resolution],
+            c=colors[idx % len(colors)],
+            edgecolors="black",
+            s=70,
+            zorder=5,
+        )
+
+
+def _draw_additional_trajectories(ax, trajectories, resolution):
+    colors = ["#ff8fab", "#80ed99", "#a0c4ff"]
+    for idx, trajectory in enumerate(trajectories):
+        if not trajectory:
+            continue
+        xs = [x / resolution for x, _ in trajectory]
+        ys = [y / resolution for _, y in trajectory]
+        ax.plot(xs, ys, color=colors[idx % len(colors)], linewidth=1.6, alpha=0.9)

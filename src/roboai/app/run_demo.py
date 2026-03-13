@@ -10,6 +10,7 @@ import numpy as np
 
 from roboai.core.control.local_avoidance import emergency_stop
 from roboai.core.control.waypoint_follower import WaypointFollower
+from roboai.core.frontier_model import load_frontier_model
 from roboai.core.frontier import frontier_cells, rank_frontier_targets
 from roboai.core.metrics import write_metrics_json
 from roboai.core.occupancy_grid import OccupancyGrid, UNKNOWN
@@ -20,7 +21,7 @@ from roboai.core.planners.smoothing import path_quality, shortcut_smooth_path
 from roboai.core.types import Pose2D, RenderFrame, RunMetrics
 from roboai.sim.grid2d.env import Grid2DEnv
 from roboai.sim.grid2d.lidar import SimulatedLidar
-from roboai.sim.grid2d.maps import built_in_map
+from roboai.sim.grid2d.maps import SEMANTIC_BEACON, built_in_map, built_in_semantic_grid
 from roboai.sim.grid2d.renderer import save_run_artifacts
 
 
@@ -68,6 +69,8 @@ def run_demo(
     range_noise_std: float = 0.0,
     dropout_prob: float = 0.0,
     pose_noise_std: float = 0.0,
+    semantic_mode: str = "enabled",
+    frontier_model_path: str | None = None,
 ) -> RunMetrics:
     np.random.seed(seed)
     requested_planner_name = planner_name
@@ -76,6 +79,8 @@ def run_demo(
     if coverage_goal is None:
         coverage_goal = DEFAULT_COVERAGE_GOALS.get(map_name, 0.80)
     obstacle_grid = built_in_map(map_name)
+    semantic_grid = built_in_semantic_grid(map_name) if semantic_mode == "enabled" else np.zeros_like(obstacle_grid, dtype=np.int8)
+    learned_weights = load_frontier_model(frontier_model_path) if frontier_model_path else None
     env = Grid2DEnv(
         obstacle_grid=obstacle_grid,
         resolution=0.2,
@@ -114,11 +119,20 @@ def run_demo(
     active_target_steps = 0
     revisit_counts: dict[tuple[int, int], int] = {}
     pose_drift = np.zeros(3, dtype=float)
+    localization_uncertainty = max(0.02, pose_noise_std)
 
     for step_idx in range(max_steps):
         estimated_pose = _estimated_pose(env.pose, pose_noise_std, pose_drift)
         scan = lidar.scan(env, env.pose)
         occ.update_from_scan(estimated_pose, scan)
+        localization_uncertainty = _update_localization_uncertainty(
+            localization_uncertainty,
+            env.pose,
+            semantic_grid,
+            pose_noise_std,
+            env.resolution,
+            moving=bool(env.trajectory and len(env.trajectory) > 1),
+        )
         coverage_history.append(occ.known_ratio())
         if coverage_history[-1] <= last_coverage + 1e-4:
             stagnant_steps += 1
@@ -136,6 +150,9 @@ def run_demo(
                     frontier_points=current_frontiers,
                     robot_pose=Pose2D(x=env.pose.x, y=env.pose.y, theta=env.pose.theta),
                     coverage=coverage_history[-1],
+                    semantic_overlay=semantic_grid,
+                    robot_poses=[Pose2D(x=env.pose.x, y=env.pose.y, theta=env.pose.theta)],
+                    localization_uncertainty=localization_uncertainty,
                 )
             )
 
@@ -169,6 +186,9 @@ def run_demo(
                 policy=frontier_policy,
                 blocked_targets=blocked_targets,
                 revisit_counts=revisit_counts,
+                semantic_grid=semantic_grid if semantic_mode == "enabled" else None,
+                localization_uncertainty=localization_uncertainty,
+                learned_weights=learned_weights,
             )
             if not targets:
                 stop_reason = "frontier_exhausted"
@@ -270,6 +290,9 @@ def run_demo(
                 frontier_points=[occ.grid_to_world(gx, gy) for gx, gy in frontier_cells(occ)],
                 robot_pose=Pose2D(x=env.pose.x, y=env.pose.y, theta=env.pose.theta),
                 coverage=coverage_history[-1] if coverage_history else 0.0,
+                semantic_overlay=semantic_grid,
+                robot_poses=[Pose2D(x=env.pose.x, y=env.pose.y, theta=env.pose.theta)],
+                localization_uncertainty=localization_uncertainty,
             )
         )
 
@@ -297,6 +320,10 @@ def run_demo(
         range_noise_std=range_noise_std,
         dropout_prob=dropout_prob,
         pose_noise_std=pose_noise_std,
+        semantic_mode=semantic_mode,
+        final_localization_uncertainty=localization_uncertainty,
+        robot_count=1,
+        time_to_coverage_step=_time_to_coverage_step(coverage_history, coverage_goal),
         explored_cells=known_cells,
         known_cells=known_cells,
         coverage_history=coverage_history,
@@ -339,11 +366,13 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--coverage-goal", type=float, default=None)
-    parser.add_argument("--frontier-policy", choices=["naive", "information_gain"], default="naive")
+    parser.add_argument("--frontier-policy", choices=["naive", "information_gain", "semantic_information_gain", "learned_linear"], default="naive")
     parser.add_argument("--disturbance", choices=["none", "moving_obstacle", "temporary_block"], default="none")
     parser.add_argument("--range-noise-std", type=float, default=0.0)
     parser.add_argument("--dropout-prob", type=float, default=0.0)
     parser.add_argument("--pose-noise-std", type=float, default=0.0)
+    parser.add_argument("--semantic-mode", choices=["enabled", "disabled"], default="enabled")
+    parser.add_argument("--frontier-model", default=None)
     args = parser.parse_args()
 
     metrics = run_demo(
@@ -357,6 +386,8 @@ def main() -> None:
         range_noise_std=args.range_noise_std,
         dropout_prob=args.dropout_prob,
         pose_noise_std=args.pose_noise_std,
+        semantic_mode=args.semantic_mode,
+        frontier_model_path=args.frontier_model,
     )
     print(json.dumps(asdict(metrics), indent=2))
 
@@ -385,6 +416,30 @@ def _estimated_pose(true_pose: Pose2D, pose_noise_std: float, drift_state: np.nd
         y=float(true_pose.y + drift_state[1]),
         theta=float(true_pose.theta + drift_state[2] * 0.5),
     )
+
+
+def _update_localization_uncertainty(
+    uncertainty: float,
+    true_pose: Pose2D,
+    semantic_grid: np.ndarray,
+    pose_noise_std: float,
+    resolution: float,
+    moving: bool,
+) -> float:
+    gx = int(true_pose.x / resolution)
+    gy = int(true_pose.y / resolution)
+    uncertainty += 0.012 if moving else 0.003
+    uncertainty += pose_noise_std * 0.35
+    if 0 <= gy < semantic_grid.shape[0] and 0 <= gx < semantic_grid.shape[1] and semantic_grid[gy, gx] == SEMANTIC_BEACON:
+        uncertainty *= 0.45
+    return float(min(max(uncertainty, 0.0), 1.5))
+
+
+def _time_to_coverage_step(coverage_history: list[float], coverage_goal: float) -> int:
+    for idx, coverage in enumerate(coverage_history, start=1):
+        if coverage >= coverage_goal:
+            return idx
+    return len(coverage_history)
 
 
 if __name__ == "__main__":

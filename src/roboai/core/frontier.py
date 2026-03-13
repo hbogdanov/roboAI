@@ -4,7 +4,9 @@ from collections import deque
 
 import numpy as np
 
+from roboai.core.frontier_model import score_frontier
 from roboai.core.occupancy_grid import FREE, UNKNOWN, OccupancyGrid
+from roboai.sim.grid2d.maps import SEMANTIC_BEACON, SEMANTIC_DESK, SEMANTIC_DOOR, SEMANTIC_EXIT, SEMANTIC_PERSON
 
 
 def frontier_cells(grid: OccupancyGrid) -> list[tuple[int, int]]:
@@ -50,6 +52,9 @@ def rank_frontier_targets(
     blocked_targets: list[tuple[float, float]] | None = None,
     revisit_counts: dict[tuple[int, int], int] | None = None,
     blocked_radius: float = 0.75,
+    semantic_grid: np.ndarray | None = None,
+    localization_uncertainty: float = 0.0,
+    learned_weights: dict[str, float] | None = None,
 ) -> list[tuple[float, float]]:
     regions = frontier_regions(grid)
     if not regions:
@@ -75,16 +80,21 @@ def rank_frontier_targets(
             heading_penalty = abs(heading_error) * 0.75
         blocked_penalty = _blocked_penalty(representative, blocked_targets, radius=blocked_radius)
         revisit_penalty = float(revisit_counts.get(grid.world_to_grid(*representative), 0)) * 0.6
-        if policy == "information_gain":
-            score = _information_gain_score(
-                grid=grid,
-                representative=(float(representative[0]), float(representative[1])),
-                distance=distance,
-                heading_penalty=heading_penalty,
-                region_size=region_size,
-                blocked_penalty=blocked_penalty,
-                revisit_penalty=revisit_penalty,
-            )
+        features = _frontier_features(
+            grid=grid,
+            representative=(float(representative[0]), float(representative[1])),
+            distance=distance,
+            heading_penalty=heading_penalty,
+            region_size=region_size,
+            blocked_penalty=blocked_penalty,
+            revisit_penalty=revisit_penalty,
+            semantic_grid=semantic_grid,
+            localization_uncertainty=localization_uncertainty,
+        )
+        if policy == "learned_linear":
+            score = -score_frontier(features, learned_weights)
+        elif policy in {"information_gain", "semantic_information_gain"}:
+            score = _information_gain_score(features)
         else:
             score = distance + heading_penalty - 0.15 * region_size + blocked_penalty + revisit_penalty
         scored_targets.append((score, (float(representative[0]), float(representative[1]))))
@@ -92,7 +102,7 @@ def rank_frontier_targets(
     return [target for _, target in scored_targets]
 
 
-def _information_gain_score(
+def _frontier_features(
     grid: OccupancyGrid,
     representative: tuple[float, float],
     distance: float,
@@ -100,14 +110,39 @@ def _information_gain_score(
     region_size: float,
     blocked_penalty: float,
     revisit_penalty: float,
-) -> float:
+    semantic_grid: np.ndarray | None,
+    localization_uncertainty: float,
+) -> dict[str, float]:
     gx, gy = grid.world_to_grid(*representative)
-    info_gain = float(_unknown_neighbors_within_radius(grid, gx, gy, radius_cells=6))
-    path_cost = distance
-    orientation_cost = heading_penalty
-    region_bonus = 0.12 * region_size
-    info_bonus = 0.42 * info_gain
-    return path_cost + orientation_cost + blocked_penalty + revisit_penalty - region_bonus - info_bonus
+    semantic_value = _semantic_value(semantic_grid, gx, gy)
+    beacon_bonus = _beacon_bonus(semantic_grid, gx, gy)
+    uncertainty_penalty = localization_uncertainty * max(distance - beacon_bonus, 0.0)
+    return {
+        "bias": 1.0,
+        "distance": distance,
+        "heading_penalty": heading_penalty,
+        "region_size": region_size,
+        "info_gain": float(_unknown_neighbors_within_radius(grid, gx, gy, radius_cells=6)),
+        "semantic_value": semantic_value,
+        "blocked_penalty": blocked_penalty,
+        "revisit_penalty": revisit_penalty,
+        "uncertainty_penalty": uncertainty_penalty,
+        "beacon_bonus": beacon_bonus,
+    }
+
+
+def _information_gain_score(features: dict[str, float]) -> float:
+    return (
+        features["distance"]
+        + features["heading_penalty"]
+        + features["blocked_penalty"]
+        + features["revisit_penalty"]
+        + 0.55 * features["uncertainty_penalty"]
+        - 0.12 * features["region_size"]
+        - 0.42 * features["info_gain"]
+        - 0.35 * features["semantic_value"]
+        - 0.25 * features["beacon_bonus"]
+    )
 
 
 def _unknown_neighbors_within_radius(grid: OccupancyGrid, gx: int, gy: int, radius_cells: int) -> int:
@@ -126,6 +161,36 @@ def _blocked_penalty(representative: np.ndarray, blocked_targets: list[tuple[flo
         if distance <= radius:
             penalty += 4.0
     return penalty
+
+
+def _semantic_value(semantic_grid: np.ndarray | None, gx: int, gy: int) -> float:
+    if semantic_grid is None:
+        return 0.0
+    x0 = max(0, gx - 4)
+    x1 = min(semantic_grid.shape[1], gx + 5)
+    y0 = max(0, gy - 4)
+    y1 = min(semantic_grid.shape[0], gy + 5)
+    local = semantic_grid[y0:y1, x0:x1]
+    weights = {
+        SEMANTIC_DOOR: 1.0,
+        SEMANTIC_DESK: 0.7,
+        SEMANTIC_EXIT: 1.2,
+        SEMANTIC_PERSON: 0.8,
+    }
+    total = 0.0
+    for semantic_id, weight in weights.items():
+        total += weight * float(np.count_nonzero(local == semantic_id))
+    return total
+
+
+def _beacon_bonus(semantic_grid: np.ndarray | None, gx: int, gy: int) -> float:
+    if semantic_grid is None:
+        return 0.0
+    ys, xs = np.nonzero(semantic_grid == SEMANTIC_BEACON)
+    if len(xs) == 0:
+        return 0.0
+    min_distance = min(float(np.hypot(gx - x, gy - y)) for x, y in zip(xs, ys))
+    return max(0.0, 6.0 - min_distance) / 6.0
 
 
 def _neighbors4(gx: int, gy: int):

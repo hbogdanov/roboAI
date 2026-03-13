@@ -1,0 +1,12 @@
+{
+  "bias": -0.00012818263108616172,
+  "distance": -0.9999802140286563,
+  "heading_penalty": -0.4999848309336557,
+  "region_size": 0.12000059823137836,
+  "info_gain": 0.5500005509872875,
+  "semantic_value": 0.3499882221112487,
+  "blocked_penalty": 0.0,
+  "revisit_penalty": 0.0,
+  "uncertainty_penalty": -0.8000161734094552,
+  "beacon_bonus": 0.1974284820661698
+}

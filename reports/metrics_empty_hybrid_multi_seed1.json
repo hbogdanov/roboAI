@@ -1,0 +1,33 @@
+{
+  "map_name": "empty",
+  "planner_name": "hybrid",
+  "planner_policy": "cooperative",
+  "frontier_policy": "semantic_information_gain",
+  "seed": 1,
+  "success": true,
+  "stop_reason": "coverage_goal_reached",
+  "steps": 1,
+  "runtime_seconds": 0.28965270000117016,
+  "coverage": 0.6977777777777778,
+  "path_length": 0.0,
+  "raw_path_length": 0.0,
+  "smoothed_path_length": 0.0,
+  "path_turn_count": 0,
+  "collisions": 0,
+  "replans": 0,
+  "replan_triggers": 0,
+  "recovery_events": 0,
+  "disturbance_name": "none",
+  "disturbance_events": 0,
+  "range_noise_std": 0.0,
+  "dropout_prob": 0.0,
+  "pose_noise_std": 0.01,
+  "semantic_mode": "enabled",
+  "final_localization_uncertainty": 0.060000000000000005,
+  "robot_count": 2,
+  "explored_cells": 2512,
+  "known_cells": 2512,
+  "coverage_history": [
+    0.6977777777777778
+  ]
+}
