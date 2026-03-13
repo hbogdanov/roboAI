@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>roboai_bringup</name>
+  <version>0.1.0</version>
+  <description>Launch and parameter files for RoboAI ROS2 simulation.</description>
+  <maintainer email="ivan@example.com">Ivan</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>roboai_mapping</exec_depend>
+  <exec_depend>roboai_frontier</exec_depend>
+  <exec_depend>roboai_planning</exec_depend>
+  <exec_depend>roboai_control</exec_depend>
+  <exec_depend>roboai_manager</exec_depend>
+  <exec_depend>roboai_viz</exec_depend>
+</package>

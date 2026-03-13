@@ -191,3 +191,5 @@ python -m roboai.app.train_frontier_model --out reports/frontier_model_weights.j
 python -m roboai.app.run_multi_demo --map office --planner hybrid --seed 7
 python -m roboai.app.run_ros2_demo --map office --planner hybrid --seed 7
 ```
+
+For the ROS2 migration scaffold, see [`roboai_ros2_ws/README.md`](roboai_ros2_ws/README.md).

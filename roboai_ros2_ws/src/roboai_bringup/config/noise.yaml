@@ -1,0 +1,11 @@
+mapping:
+  ros__parameters:
+    range_noise_std: 0.015
+    dropout_prob: 0.03
+    pose_noise_std: 0.01
+
+frontier:
+  ros__parameters:
+    frontier_policy: semantic_information_gain
+    semantic_mode: true
+    uncertainty_weight: 0.85

@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>roboai_viz</name>
+  <version>0.1.0</version>
+  <description>RoboAI visualization node scaffold.</description>
+  <maintainer email="ivan@example.com">Ivan</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>roboai_msgs</exec_depend>
+</package>

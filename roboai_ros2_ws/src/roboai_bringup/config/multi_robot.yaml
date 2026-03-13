@@ -1,0 +1,16 @@
+manager:
+  ros__parameters:
+    robot_names:
+      - robot1
+      - robot2
+    shared_map: true
+    assignment_radius: 0.8
+    deconfliction_radius: 0.64
+
+planning:
+  ros__parameters:
+    planner_mode: hybrid
+
+frontier:
+  ros__parameters:
+    frontier_policy: semantic_information_gain

@@ -231,6 +231,9 @@ results/
 checkpoints/
 logs/
 outputs/
+roboai_ros2_ws/build/
+roboai_ros2_ws/install/
+roboai_ros2_ws/log/
 
 # --- Secrets & Configs ---
 config.yaml

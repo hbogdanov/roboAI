@@ -1,0 +1,32 @@
+mapping:
+  ros__parameters:
+    map_resolution: 0.05
+    map_width: 400
+    map_height: 400
+
+frontier:
+  ros__parameters:
+    frontier_policy: semantic_information_gain
+    semantic_mode: true
+    uncertainty_weight: 0.55
+    frontier_model_path: reports/frontier_model_weights.json
+
+planning:
+  ros__parameters:
+    planner_mode: hybrid
+    robot_radius: 0.16
+
+control:
+  ros__parameters:
+    linear_speed: 0.55
+    angular_gain: 2.8
+    waypoint_tolerance: 0.2
+
+manager:
+  ros__parameters:
+    coverage_goal: 0.65
+    blocked_target_radius: 0.75
+
+viz:
+  ros__parameters:
+    marker_scale: 0.12
