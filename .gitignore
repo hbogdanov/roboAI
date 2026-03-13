@@ -234,6 +234,7 @@ outputs/
 roboai_ros2_ws/build/
 roboai_ros2_ws/install/
 roboai_ros2_ws/log/
+roboai_ros2_ws_old/
 
 # --- Secrets & Configs ---
 config.yaml

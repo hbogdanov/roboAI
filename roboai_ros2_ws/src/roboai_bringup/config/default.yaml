@@ -1,0 +1,10 @@
+/**:
+  ros__parameters:
+    map_width: 400
+    map_height: 400
+    map_resolution: 0.05
+    frontier_policy: information_gain
+    robot_radius: 0.16
+    linear_speed: 0.22
+    angular_gain: 2.8
+    waypoint_tolerance: 0.12

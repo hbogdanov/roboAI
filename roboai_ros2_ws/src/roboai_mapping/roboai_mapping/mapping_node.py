@@ -1,91 +1,90 @@
+from __future__ import annotations
+
 import math
 
+import numpy as np
 import rclpy
+from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
-from nav_msgs.msg import Odometry, OccupancyGrid
+
+from roboai.core.occupancy_grid import OccupancyGrid as CoreOccupancyGrid
+from roboai.core.types import LaserScan2D, Pose2D
 
 
 class MappingNode(Node):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("mapping_node")
 
-        self.latest_odom = None
-        self.latest_scan = None
+        self.declare_parameter("map_width", 400)
+        self.declare_parameter("map_height", 400)
+        self.declare_parameter("map_resolution", 0.05)
 
-        self.width = 200
-        self.height = 200
-        self.resolution = 0.05
-        self.origin_x = -(self.width * self.resolution) / 2.0
-        self.origin_y = -(self.height * self.resolution) / 2.0
+        width = int(self.get_parameter("map_width").value)
+        height = int(self.get_parameter("map_height").value)
+        resolution = float(self.get_parameter("map_resolution").value)
+        origin = (-(width * resolution) / 2.0, -(height * resolution) / 2.0)
 
-        self.grid = [-1] * (self.width * self.height)
+        self.grid = CoreOccupancyGrid(width=width, height=height, resolution=resolution, origin=origin)
+        self.latest_pose: Pose2D | None = None
 
         self.create_subscription(LaserScan, "/scan", self.scan_callback, 10)
         self.create_subscription(Odometry, "/odom", self.odom_callback, 10)
         self.map_pub = self.create_publisher(OccupancyGrid, "/map", 10)
 
-        self.timer = self.create_timer(0.5, self.publish_map)
-
-        self.get_logger().info("mapping_node started")
+        self.get_logger().info("mapping_node started, publishing /map from /scan + /odom")
 
     def odom_callback(self, msg: Odometry) -> None:
-        self.latest_odom = msg
+        self.latest_pose = Pose2D(
+            x=float(msg.pose.pose.position.x),
+            y=float(msg.pose.pose.position.y),
+            theta=_yaw_from_quaternion(msg.pose.pose.orientation),
+        )
 
     def scan_callback(self, msg: LaserScan) -> None:
-        self.latest_scan = msg
-
-    def world_to_grid(self, x: float, y: float):
-        gx = int((x - self.origin_x) / self.resolution)
-        gy = int((y - self.origin_y) / self.resolution)
-        if 0 <= gx < self.width and 0 <= gy < self.height:
-            return gx, gy
-        return None
-
-    def mark_cell(self, x: float, y: float, value: int) -> None:
-        cell = self.world_to_grid(x, y)
-        if cell is None:
-            return
-        gx, gy = cell
-        idx = gy * self.width + gx
-        self.grid[idx] = value
-
-    def publish_map(self) -> None:
-        if self.latest_odom is None or self.latest_scan is None:
+        if self.latest_pose is None:
             return
 
-        rx = self.latest_odom.pose.pose.position.x
-        ry = self.latest_odom.pose.pose.position.y
-
-        robot_cell = self.world_to_grid(rx, ry)
-        if robot_cell is not None:
-            gx, gy = robot_cell
-            self.grid[gy * self.width + gx] = 0
-
-        angle = self.latest_scan.angle_min
-        for r in self.latest_scan.ranges:
-            if math.isfinite(r):
-                ex = rx + r * math.cos(angle)
-                ey = ry + r * math.sin(angle)
-                self.mark_cell(ex, ey, 100)
-            angle += self.latest_scan.angle_increment
-
-        msg = OccupancyGrid()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = "map"
-
-        msg.info.resolution = self.resolution
-        msg.info.width = self.width
-        msg.info.height = self.height
-        msg.info.origin.position.x = self.origin_x
-        msg.info.origin.position.y = self.origin_y
-        msg.info.origin.orientation.w = 1.0
-
-        msg.data = self.grid
-        self.map_pub.publish(msg)
+        ranges = np.asarray(msg.ranges, dtype=float)
+        ranges[~np.isfinite(ranges)] = float(msg.range_max)
+        angles = np.asarray(
+            [msg.angle_min + idx * msg.angle_increment for idx in range(len(msg.ranges))],
+            dtype=float,
+        )
+        scan = LaserScan2D(angles=angles, ranges=ranges, max_range=float(msg.range_max))
+        self.grid.update_from_scan(self.latest_pose, scan)
+        self.map_pub.publish(_to_ros_map(self.grid, self.get_clock().now().to_msg()))
 
 
-def main(args=None):
+def _to_ros_map(grid: CoreOccupancyGrid, stamp) -> OccupancyGrid:
+    msg = OccupancyGrid()
+    msg.header.stamp = stamp
+    msg.header.frame_id = "map"
+    msg.info.resolution = float(grid.resolution)
+    msg.info.width = int(grid.width)
+    msg.info.height = int(grid.height)
+    msg.info.origin.position.x = float(grid.origin[0])
+    msg.info.origin.position.y = float(grid.origin[1])
+    msg.info.origin.orientation.w = 1.0
+    data = []
+    for value in grid.grid.flatten():
+        if value < 0:
+            data.append(-1)
+        elif value == 0:
+            data.append(0)
+        else:
+            data.append(100)
+    msg.data = data
+    return msg
+
+
+def _yaw_from_quaternion(quaternion) -> float:
+    siny_cosp = 2.0 * (quaternion.w * quaternion.z + quaternion.x * quaternion.y)
+    cosy_cosp = 1.0 - 2.0 * (quaternion.y * quaternion.y + quaternion.z * quaternion.z)
+    return float(math.atan2(siny_cosp, cosy_cosp))
+
+
+def main(args=None) -> None:
     rclpy.init(args=args)
     node = MappingNode()
     rclpy.spin(node)

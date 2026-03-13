@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>roboai_mapping</name>
-  <version>0.0.0</version>
-  <description>RoboAI mapping node</description>
-  <maintainer email="hbogdanov@todo.todo">hbogdanov</maintainer>
+  <version>0.1.0</version>
+  <description>RoboAI ROS2 mapping prototype package.</description>
+  <maintainer email="hbogdanov@users.noreply.github.com">Hristo Bogdanov</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_python</buildtool_depend>
@@ -11,6 +11,7 @@
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>
   <depend>nav_msgs</depend>
+  <depend>geometry_msgs</depend>
 
   <export>
     <build_type>ament_python</build_type>
